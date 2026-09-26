@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow"><title>Dashboard -- AI Visibility Monitor</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+  <div class="wrap">
+    <div style="display:flex; justify-content:space-between; align-items:baseline;">
+      <h1>Your businesses</h1>
+      <a class="back" href="{{ url_for('auth.logout') }}">log out</a>
+    </div>
+    <p class="sub">{{ current_user.email }} &middot;
+      {% if current_user.is_subscribed %}
+        <span style="color:var(--good);">subscribed{{ ' (demo)' if current_user.subscription_status == 'demo' else '' }}</span>
+      {% else %}
+        <span style="color:var(--bad);">not subscribed</span>
+      {% endif %}
+    </p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
+
+    {% if not current_user.is_subscribed %}
+    <div class="card">
+      <h3 style="margin-top:0;">Subscribe to monitor a business</h3>
+      <p class="sub" style="margin-bottom:0;">Weekly automatic re-checks and email alerts when your visibility changes.</p>
+      <a href="{{ url_for('billing.checkout') }}"><button type="button">Subscribe -- $29/month</button></a>
+    </div>
+    {% endif %}
+
+    {% for b in businesses %}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong>{{ b.name }}</strong>
+          <div class="sub" style="margin:2px 0 0;">{{ b.category }} &middot; {{ b.location }}</div>
+        </div>
+        {% if b.latest_run and b.latest_run.visibility_score is not none %}
+        <div class="score {{ 'good' if b.latest_run.visibility_score >= 70 else ('mid' if b.latest_run.visibility_score >= 40 else 'bad') }}" style="font-size:1.8rem;">
+          {{ b.latest_run.visibility_score }}%
+        </div>
+        {% elif b.latest_run %}
+        <div class="score bad" style="font-size:1.8rem;">N/A</div>
+        {% endif %}
+      </div>
+      <a class="back" href="{{ url_for('business_detail', business_id=b.id) }}">view history &rarr;</a>
+    </div>
+    {% else %}
+    <p class="sub">No businesses yet.</p>
+    {% endfor %}
+
+    {% if current_user.is_subscribed %}
+    <form class="card" method="POST" action="{{ url_for('add_business') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3 style="margin-top:0;">Add a business to monitor</h3>
+      <label for="name">Business name</label>
+      <input id="name" name="name" required maxlength="200">
+      <label for="category">Category</label>
+      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist">
+      <label for="location">Location</label>
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
+      <label for="competitors">Competitors (comma-separated, optional, up to 10)</label>
+      <input id="competitors" name="competitors" maxlength="1000">
+      <button type="submit">Add &amp; run first check</button>
+    </form>
+    {% endif %}
+  </div>
+</body>
+</html>

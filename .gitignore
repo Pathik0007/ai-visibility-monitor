@@ -1,0 +1,17 @@
+# secrets -- never commit real API/Stripe/SMTP keys
+.env
+
+# local database + generated logs
+data.db
+alerts_outbox.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# editor/OS cruft
+.DS_Store
+.vscode/
+.idea/

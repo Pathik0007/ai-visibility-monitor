@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow"><title>{{ business.name }} -- AI Visibility Monitor</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+  <div class="wrap">
+    <a class="back" href="{{ url_for('dashboard') }}">&larr; dashboard</a>
+    <h1>{{ business.name }}</h1>
+    <p class="sub">{{ business.category }} &middot; {{ business.location }}</p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('run_business_now', business_id=business.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">Run check now</button>
+    </form>
+
+    {% if latest %}
+    <div class="card" style="margin-top:20px;">
+      {% if latest.visibility_score is none %}
+      <div class="score bad">N/A</div>
+      {% else %}
+      <div class="score {{ 'good' if latest.visibility_score >= 70 else ('mid' if latest.visibility_score >= 40 else 'bad') }}">
+        {{ latest.visibility_score }}%
+      </div>
+      {% endif %}
+      <p class="sub" style="margin-top:0;">
+        Latest check -- {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC
+        {% if previous %}
+          (previous: {{ previous.visibility_score }}%, {{ latest.created_at.strftime('%d %b') }} vs {{ previous.created_at.strftime('%d %b') }})
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">What to fix</h3>
+      <ul class="fixlist">
+        {% for rec in latest.report.recommendations %}
+        <li>{{ rec }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p class="sub">No checks run yet.</p>
+    {% endif %}
+
+    <div class="card">
+      <h3 style="margin-top:0;">History</h3>
+      <table>
+        <tr><th>Date</th><th>Score</th><th>Change</th></tr>
+        {% for run in history %}
+        <tr>
+          <td>{{ run.created_at.strftime('%d %b %Y, %H:%M') }}</td>
+          <td>{{ run.visibility_score ~ '%' if run.visibility_score is not none else 'N/A' }}</td>
+          <td>
+            {% if not loop.last and run.visibility_score is not none %}
+              {% set prev = history[loop.index] %}
+              {% if prev.visibility_score is not none %}
+                {% set diff = run.visibility_score - prev.visibility_score %}
+                <span style="color: {{ 'var(--good)' if diff > 0 else ('var(--bad)' if diff < 0 else 'var(--muted)') }};">
+                  {{ '+' if diff > 0 else '' }}{{ diff }}
+                </span>
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+</body>
+</html>

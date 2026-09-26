@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Visibility report -- {{ report.business }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">&larr; run another check</a>
+    <h1>{{ report.business }}</h1>
+    <p class="sub">{{ category }} &middot; {{ location }}</p>
+
+    {% if report.any_demo_data %}
+    <div class="notice">
+      Some or all of these answers are simulated demo data (providers with no API key
+      configured). Add keys in <code>.env</code> for live results -- see README.md.
+    </div>
+    {% endif %}
+
+    <div class="card">
+      {% if report.visibility_score is none %}
+      <div class="score bad">N/A</div>
+      <p style="color:var(--muted); margin-top:0;">
+        Every check failed to get an answer (API errors) -- no score could be calculated. Try again shortly.
+      </p>
+      {% else %}
+      <div class="score {{ 'good' if report.visibility_score >= 70 else ('mid' if report.visibility_score >= 40 else 'bad') }}">
+        {{ report.visibility_score }}%
+      </div>
+      <p style="color:var(--muted); margin-top:0;">
+        Visibility score -- share of AI-assistant answers that mentioned {{ report.business }}{% if report.avg_position %} (average position when mentioned: #{{ "%.1f"|format(report.avg_position) }}){% endif %}{% if report.unranked_mention_count %} &middot; {{ report.unranked_mention_count }} mention(s) not in a clear ranked list{% endif %}.
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">By engine</h3>
+      <table>
+        <tr><th>Assistant</th><th>Mentioned</th><th>Mode</th></tr>
+        {% for name, stats in report.by_engine.items() %}
+        <tr>
+          <td>{{ name }}</td>
+          <td>{{ stats.mentioned }} / {{ stats.total }}{% if stats.errors %} <span style="color:var(--bad);">({{ stats.errors }} failed)</span>{% endif %}</td>
+          <td>{{ 'demo' if stats.is_demo else 'live' }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    {% if report.top_competitors %}
+    <div class="card">
+      <h3 style="margin-top:0;">Who's showing up instead</h3>
+      <table>
+        <tr><th>Competitor</th><th>Times mentioned</th></tr>
+        {% for name, count in report.top_competitors %}
+        <tr><td>{{ name }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h3 style="margin-top:0;">What to fix</h3>
+      <ul class="fixlist">
+        {% for rec in report.recommendations %}
+        <li>{{ rec }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Every question asked</h3>
+      {% for r in report.results %}
+      <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+        <div>
+          <strong>{{ r.query }}</strong>
+          <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }} &middot; {{ 'demo' if r.is_demo else 'live' }}</span>
+          <span class="pill {{ 'yes' if r.mentioned else 'no' }}">
+            {{ 'mentioned' if r.mentioned else 'not mentioned' }}{% if r.position %} (#{{ r.position }}){% endif %}
+          </span>
+        </div>
+        <details>
+          <summary>show raw answer</summary>
+          <div class="raw">{{ r.raw_text }}</div>
+        </details>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>

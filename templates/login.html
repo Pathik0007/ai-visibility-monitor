@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow"><title>Log in -- AI Visibility Monitor</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+  <div class="wrap" style="max-width:420px;">
+    <h1>Log in</h1>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
+    <form class="card" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required maxlength="255">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required maxlength="128">
+      <button type="submit">Log in</button>
+    </form>
+    <p class="sub">No account yet? <a class="back" href="{{ url_for('auth.signup') }}">Sign up</a></p>
+  </div>
+</body>
+</html>
