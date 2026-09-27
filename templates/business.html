@@ -44,6 +44,27 @@
         {% endfor %}
       </ul>
     </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Your action plan -- {{ latest.report.action_plan.category_label }}</h3>
+      <ul class="fixlist">
+        {% for step in latest.report.action_plan.quick_wins %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ul>
+      {% if latest.report.action_plan.competitor_note %}
+      <p style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">{{ latest.report.action_plan.competitor_note }}</p>
+      {% endif %}
+      {% for n in latest.report.action_plan.engine_notes %}
+      <div style="padding:8px 0;">
+        <strong>{{ n.provider }}</strong>
+        {% if n.mention_rate is not none %}<span class="sub">({{ n.mention_rate }}%)</span>{% endif %}
+        {% if n.underperforming %}<span class="badge demo" style="margin-left:6px;">weakest for you</span>{% endif %}
+        <p class="sub" style="margin:4px 0 0;">{{ n.note }}</p>
+      </div>
+      {% endfor %}
+      <p class="sub" style="font-size:0.76rem; margin-top:14px; margin-bottom:0;">{{ latest.report.action_plan.disclaimer }}</p>
+    </div>
     {% else %}
     <p class="sub">No checks run yet.</p>
     {% endif %}

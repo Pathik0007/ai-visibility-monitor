@@ -5,6 +5,7 @@ business owner actually reads: one score, a breakdown, and a fix list.
 
 from __future__ import annotations
 from collections import Counter
+from .solutions import build_action_plan
 
 FIX_LIBRARY = [
     {
@@ -36,7 +37,7 @@ FIX_LIBRARY = [
 ]
 
 
-def build_report(business: str, competitors: list[str], results: list[dict]) -> dict:
+def build_report(business: str, category: str, competitors: list[str], results: list[dict]) -> dict:
     """`results` is a flat list of dicts, each one query x provider run:
     {provider, query, mentioned, position, competitors_mentioned, is_demo, error, raw_text}
 
@@ -85,8 +86,16 @@ def build_report(business: str, competitors: list[str], results: list[dict]) -> 
         total_count=len(results),
     )
 
+    action_plan = build_action_plan(
+        category=category,
+        by_engine=by_engine,
+        mention_rate=mention_rate,
+        top_competitors=top_competitors,
+    )
+
     return {
         "business": business,
+        "category": category,
         "visibility_score": visibility_score,
         "mention_rate": mention_rate,
         "avg_position": avg_pos,
@@ -94,6 +103,7 @@ def build_report(business: str, competitors: list[str], results: list[dict]) -> 
         "by_engine": by_engine,
         "top_competitors": top_competitors,
         "recommendations": recommendations,
+        "action_plan": action_plan,
         "results": results,
         "error_count": len(errored),
         "any_demo_data": any(r["is_demo"] for r in results),

@@ -59,6 +59,30 @@ gone out. Set `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` /
 `ALERT_FROM_EMAIL` (any provider -- Gmail app password, Postmark, SES, etc.)
 to send real emails.
 
+## The action plan (not just a score)
+
+Every report includes a "Your action plan" section, tailored two ways:
+
+- **By business type** -- `ai_visibility/solutions.py` has playbooks for ~15
+  common local-business categories (restaurants, dentists, lawyers, salons,
+  trades, auto repair, real estate, etc.), each with the specific
+  directories/platforms and content moves that matter most for that kind of
+  business, falling back to solid general advice for anything unmatched.
+- **By which assistant is missing you** -- flags whichever of Claude/ChatGPT/
+  Perplexity/Gemini scored worst for this specific business, with a plain-
+  English (and deliberately hedged) note on how that assistant generally
+  tends to source its answers, so the advice points at the right lever
+  (e.g. Gemini leans on Google Business Profile; Perplexity leans on live
+  web search rankings; Claude leans on what's broadly crawled/cited).
+
+This is framed as general, defensible guidance, not a definitive diagnosis
+-- no outside tool can see exactly why a given model did or didn't mention a
+business, and that mechanism isn't published and changes over time.
+
+Reports saved before this feature existed are backfilled automatically the
+next time they're viewed (see `CheckRun.report` in `models.py`) -- no
+database migration needed.
+
 ## Business-name autocomplete
 
 The "Business name" field (on the homepage and on "add a business to

@@ -72,6 +72,34 @@
     </div>
 
     <div class="card">
+      <h3 style="margin-top:0;">Your action plan -- {{ report.action_plan.category_label }}</h3>
+      <p class="sub" style="margin-bottom:14px;">Concrete steps for this type of business, based on what actually moves the needle with AI assistants.</p>
+      <ul class="fixlist">
+        {% for step in report.action_plan.quick_wins %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ul>
+
+      {% if report.action_plan.competitor_note %}
+      <p style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">{{ report.action_plan.competitor_note }}</p>
+      {% endif %}
+
+      {% if report.action_plan.engine_notes %}
+      <h4 style="margin-bottom:8px;">Why a specific assistant might be missing you</h4>
+      {% for n in report.action_plan.engine_notes %}
+      <div style="padding:8px 0;">
+        <strong>{{ n.provider }}</strong>
+        {% if n.mention_rate is not none %}<span class="sub">({{ n.mention_rate }}% of your checks)</span>{% endif %}
+        {% if n.underperforming %}<span class="badge demo" style="margin-left:6px;">weakest for you</span>{% endif %}
+        <p class="sub" style="margin:4px 0 0;">{{ n.note }}</p>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <p class="sub" style="font-size:0.76rem; margin-top:14px; margin-bottom:0;">{{ report.action_plan.disclaimer }}</p>
+    </div>
+
+    <div class="card">
       <h3 style="margin-top:0;">Every question asked</h3>
       {% for r in report.results %}
       <div style="padding:10px 0; border-bottom:1px solid var(--border);">

@@ -70,7 +70,21 @@ class CheckRun(db.Model):
 
     @property
     def report(self) -> dict:
-        return json.loads(self.report_json)
+        data = json.loads(self.report_json)
+        # Reports saved before the "action plan" feature existed won't have this
+        # key. Backfill it from the rest of the stored data (and the parent
+        # Business's category, since older reports didn't store category either)
+        # instead of crashing the history page or needing a DB migration.
+        if "action_plan" not in data:
+            from ai_visibility.solutions import build_action_plan
+            category = data.get("category") or (self.business.category if self.business else "")
+            data["action_plan"] = build_action_plan(
+                category=category,
+                by_engine=data.get("by_engine", {}),
+                mention_rate=data.get("mention_rate") or 0,
+                top_competitors=data.get("top_competitors", []),
+            )
+        return data
 
     @staticmethod
     def from_report(business_id: int, report: dict) -> "CheckRun":

@@ -58,7 +58,7 @@ def run_visibility_check(business: str, category: str, location: str,
     tasks = [(query, provider) for query in queries for provider in ALL_PROVIDERS]
 
     if not tasks:
-        return build_report(business, competitors, [])
+        return build_report(business, category, competitors, [])
 
     results_by_index: dict[int, dict] = {}
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks))) as executor:
@@ -70,4 +70,4 @@ def run_visibility_check(business: str, category: str, location: str,
             results_by_index[futures[future]] = future.result()
 
     results = [results_by_index[i] for i in range(len(tasks))]
-    return build_report(business, competitors, results)
+    return build_report(business, category, competitors, results)
