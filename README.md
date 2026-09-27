@@ -89,10 +89,16 @@ The "Business name" field (on the homepage and on "add a business to
 monitor") searches as you type and, when you pick a result, also fills in
 category and location -- so you usually only type the name.
 
-- No setup needed: it uses free OpenStreetMap (Nominatim) search by default.
-- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places instead (usually
-  broader coverage); it automatically falls back to OpenStreetMap if the
-  Google lookup ever fails.
+- No setup needed: it uses Photon (photon.komoot.io), a free OpenStreetMap-based
+  search API built for exactly this search-as-you-type use case, by default.
+- Coverage caveat: the free path only suggests places that exist in
+  OpenStreetMap's database. Well-known chains are reliably there; a small
+  independent business may return zero suggestions even when everything is
+  working correctly -- try a well-known chain first if you want to sanity-check
+  the feature itself.
+- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places instead, for a
+  much larger place database; it automatically falls back to the free path if
+  the Google lookup ever fails.
 - Entirely optional -- if the lookup is slow, blocked, or down, the fields
   just behave like plain text inputs. Nothing about submitting the form
   depends on it.

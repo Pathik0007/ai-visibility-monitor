@@ -2,8 +2,24 @@
 Business-name autocomplete for the "Business name" field.
 
 Same demo-mode philosophy as ai_visibility/providers/: works out of the box
-with zero setup (OpenStreetMap Nominatim, free, no key), and upgrades
-automatically to Google Places if GOOGLE_PLACES_API_KEY is set in .env.
+with zero setup, and upgrades automatically to Google Places if
+GOOGLE_PLACES_API_KEY is set in .env.
+
+The free default is Photon (photon.komoot.io), an OpenStreetMap-based
+search API that's actually built for search-as-you-type use. An earlier
+version of this called OpenStreetMap's own Nominatim search endpoint
+directly for this -- that was a mistake: Nominatim's usage policy
+explicitly prohibits autocomplete/typeahead traffic against its public
+instance, and it also tends to rate-limit or reject requests from cloud/
+datacenter IPs (which is what a Render/Railway/Heroku-style host looks
+like to it) -- so in production it would silently return nothing, every
+time, which is exactly the symptom that flagged this.
+
+Coverage caveat either way: the free path only ever suggests places that
+exist in OpenStreetMap's own database. Well-known chains are reliably
+there; a small independent business may return zero results even when
+everything here is working correctly -- that's a data-coverage limit, not
+a bug. Set GOOGLE_PLACES_API_KEY for Google's much larger place database.
 
 Either backend returns enough to fill in all three fields when someone picks
 a suggestion: the business name, a best-guess category (e.g. "restaurant",
@@ -29,7 +45,7 @@ DEFAULT_LIMIT = 5
 
 # Small in-memory cache so identical queries typed by many users (or by the
 # same user re-focusing the field) don't re-hit the external API every time,
-# and so we stay well within Nominatim's "no heavy use" usage policy.
+# and so we stay well within the free Photon instance's fair-use expectations.
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _CACHE_TTL = 300  # seconds
 _CACHE_MAX_ENTRIES = 500
@@ -63,51 +79,52 @@ def _humanize(type_str: str) -> str:
     return type_str.replace("_", " ").strip().lower()
 
 
-def _map_osm_category(item: dict) -> str:
-    extratags = item.get("extratags") or {}
-    if extratags.get("cuisine"):
-        return _humanize(extratags["cuisine"].split(";")[0])
-    osm_type = item.get("type", "")
-    if osm_type and osm_type not in _GENERIC_TYPES:
-        return _humanize(osm_type)
-    osm_class = item.get("class", "")
-    return _humanize(osm_class) if osm_class else ""
+def _map_osm_props_category(props: dict) -> str:
+    osm_value = props.get("osm_value", "")
+    if osm_value and osm_value not in _GENERIC_TYPES:
+        return _humanize(osm_value)
+    osm_key = props.get("osm_key", "")
+    return _humanize(osm_key) if osm_key else ""
 
 
-def _format_osm_location(address: dict) -> str:
-    if not address:
-        return ""
-    city = (
-        address.get("city") or address.get("town") or address.get("village")
-        or address.get("suburb") or address.get("municipality") or ""
-    )
-    region = address.get("state") or address.get("region") or ""
-    parts = [p for p in (city, region) if p]
+def _format_photon_location(props: dict) -> str:
+    city = props.get("city") or props.get("district") or props.get("county") or ""
+    state = props.get("state") or ""
+    parts = [p for p in (city, state) if p]
     return ", ".join(parts)
 
 
-def _search_nominatim(query: str, limit: int) -> list[dict]:
+def _format_photon_address(props: dict) -> str:
+    parts = []
+    street_part = " ".join(p for p in (props.get("housenumber"), props.get("street")) if p)
+    if street_part:
+        parts.append(street_part)
+    for key in ("city", "state", "country"):
+        value = props.get(key)
+        if value and value not in parts:
+            parts.append(value)
+    return ", ".join(parts)
+
+
+def _search_photon(query: str, limit: int) -> list[dict]:
     resp = requests.get(
-        "https://nominatim.openstreetmap.org/search",
-        params={
-            "q": query, "format": "jsonv2", "addressdetails": 1,
-            "extratags": 1, "limit": limit,
-        },
-        headers={
-            # Nominatim's usage policy requires an identifying User-Agent.
-            "User-Agent": "AI-Visibility-Monitor/1.0 (business-name autocomplete)"
-        },
+        "https://photon.komoot.io/api/",
+        params={"q": query, "limit": limit, "lang": "en"},
+        headers={"User-Agent": "AI-Visibility-Monitor/1.0 (business-name autocomplete)"},
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     results = []
-    for item in resp.json():
-        name = item.get("namedetails", {}).get("name") or item.get("name") or item.get("display_name", "").split(",")[0]
+    for feature in resp.json().get("features", []):
+        props = feature.get("properties") or {}
+        name = props.get("name")
+        if not name:
+            continue  # a bare street/postcode match with no place name isn't a useful suggestion here
         results.append({
             "name": name,
-            "category": _map_osm_category(item),
-            "location": _format_osm_location(item.get("address") or {}),
-            "full_address": item.get("display_name", ""),
+            "category": _map_osm_props_category(props),
+            "location": _format_photon_location(props),
+            "full_address": _format_photon_address(props),
         })
     return results
 
@@ -165,9 +182,9 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
 
     if not results:
         try:
-            results = _search_nominatim(query, limit)
+            results = _search_photon(query, limit)
         except Exception as exc:
-            logger.warning("Nominatim autocomplete failed: %s", exc)
+            logger.warning("Photon autocomplete failed: %s", exc)
             results = []
 
     _cache_set(cache_key, results)
