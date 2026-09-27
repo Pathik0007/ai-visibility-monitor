@@ -41,10 +41,11 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="business">Business name</label>
-      <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental">
+      <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental" autocomplete="off">
+      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category and location too.</p>
 
       <label for="category">Category</label>
-      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist">
+      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist (auto-fills if you pick a search result above)">
 
       <label for="location">Location</label>
       <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
@@ -79,5 +80,11 @@
       </p>
     </section>
   </div>
+  <script src="/static/autocomplete.js" defer></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      attachPlaceAutocomplete("business", "category", "location");
+    });
+  </script>
 </body>
 </html>

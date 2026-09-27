@@ -31,6 +31,7 @@ from billing import billing_bp
 from alerts import check_business_and_alert, run_weekly_checks
 from ai_visibility.pipeline import run_visibility_check
 from ai_visibility.providers import ALL_PROVIDERS
+from places import search_places
 
 IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
 DEFAULT_DEV_SECRET = "dev-secret-change-me"
@@ -134,6 +135,7 @@ def robots_txt():
         "Disallow: /businesses/\n"
         "Disallow: /login\n"
         "Disallow: /signup\n"
+        "Disallow: /api/\n"
         f"Sitemap: {url_for('sitemap_xml', _external=True)}\n"
     )
     return app.response_class(body, mimetype="text/plain")
@@ -148,6 +150,20 @@ def sitemap_xml():
         "</urlset>\n"
     )
     return app.response_class(body, mimetype="application/xml")
+
+
+@app.route("/api/places")
+@limiter.limit("30 per minute")
+def api_places():
+    """Business-name autocomplete, called as-you-type from the form. Always
+    returns 200 with a (possibly empty) list -- never a hard error -- so a
+    slow/unavailable lookup provider never breaks the underlying text field."""
+    query = request.args.get("q", "")
+    try:
+        results = search_places(query)
+    except Exception:
+        results = []
+    return {"results": results}
 
 
 @app.route("/check", methods=["POST"])

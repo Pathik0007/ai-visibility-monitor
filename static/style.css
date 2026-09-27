@@ -101,3 +101,24 @@ a.back { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
   font-size: 0.88rem;
   margin-bottom: 20px;
 }
+.ac-wrap { position: relative; }
+.ac-list {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.ac-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.ac-item-name { font-size: 0.92rem; color: var(--text); }
+.ac-item-sub { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+.ac-item-active, .ac-item:hover { background: #232732; }

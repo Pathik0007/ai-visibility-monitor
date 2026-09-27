@@ -59,6 +59,20 @@ gone out. Set `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` /
 `ALERT_FROM_EMAIL` (any provider -- Gmail app password, Postmark, SES, etc.)
 to send real emails.
 
+## Business-name autocomplete
+
+The "Business name" field (on the homepage and on "add a business to
+monitor") searches as you type and, when you pick a result, also fills in
+category and location -- so you usually only type the name.
+
+- No setup needed: it uses free OpenStreetMap (Nominatim) search by default.
+- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places instead (usually
+  broader coverage); it automatically falls back to OpenStreetMap if the
+  Google lookup ever fails.
+- Entirely optional -- if the lookup is slow, blocked, or down, the fields
+  just behave like plain text inputs. Nothing about submitting the form
+  depends on it.
+
 ## How it works
 
 **Core engine** (used by both the anonymous check and saved businesses):
