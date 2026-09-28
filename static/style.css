@@ -339,6 +339,7 @@ a.back:hover { color: var(--accent); text-decoration: none; }
 .ac-item-name { font-size: 0.92rem; color: var(--text); font-weight: 500; }
 .ac-item-sub { font-size: 0.76rem; color: var(--muted-dim); margin-top: 2px; }
 .ac-item-active, .ac-item:hover { background: var(--card-hover); }
+.ac-empty { padding: 10px 12px; font-size: 0.82rem; color: var(--muted-dim); cursor: default; }
 
 /* ---------- error pages ---------- */
 .error-page { text-align: center; padding: 80px 0; }

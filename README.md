@@ -307,6 +307,32 @@ in full):
   alone, and skips the category/location autofill (a competitor is just a
   name).
 
+**Fourth pass** (a real business name legitimately not in Photon's free
+database looked identical to a broken search -- dug into why and found two
+related bugs alongside it):
+
+- **A failed lookup was cached as if it were a real empty result** --
+  `search_places`/`geocode_location` cached whatever came back even when the
+  request itself had thrown (timeout, rate limit, transient network error),
+  so one blip made every identical query return nothing for the full 5-minute
+  cache TTL even after the provider recovered. Now only a lookup that
+  actually completed gets cached -- including a genuine zero-result answer,
+  which is still worth caching -- so a failure is retried on the very next
+  keystroke instead of being remembered as "no results" for 5 minutes.
+- **No feedback when a search genuinely finds nothing** -- a small business
+  that just isn't in Photon's OpenStreetMap-backed dataset (a known,
+  documented coverage limit, not a bug) rendered identically to "haven't
+  typed enough yet": nothing at all. Added a plain "No matches -- you can
+  still type it in manually" note so a real completed-but-empty search is
+  distinguishable from a search that hasn't run yet, and reads as expected
+  behavior rather than a broken widget.
+- **Race condition: a slow, stale response could overwrite a faster, newer
+  one** -- typing quickly (e.g. finishing a longer name after an initial
+  slower search was already in flight) had no guarantee responses would
+  render in the order they were sent. Added a per-field request sequence
+  number so only the most recently *fired* search is ever allowed to render;
+  an older one that resolves late is silently dropped.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

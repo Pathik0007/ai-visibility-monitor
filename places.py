@@ -186,18 +186,27 @@ def geocode_location(location_text: str) -> dict | None:
 
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     result = None
+    succeeded = False
     if api_key:
         try:
             result = _geocode_google(location_text, api_key)
+            succeeded = True
         except Exception as exc:
             logger.warning("Google geocoding failed, falling back: %s", exc)
-    if not result:
+    if not succeeded:
         try:
             result = _geocode_photon(location_text)
+            succeeded = True
         except Exception as exc:
             logger.warning("Photon geocoding failed: %s", exc)
 
-    _cache_set(cache_key, result or {})
+    # Only cache a lookup that actually completed -- including a genuine
+    # "nothing there" answer from a successful call. Caching a *failure*
+    # (timeout, rate limit, transient network blip) as if it were a real
+    # empty result would silently suppress every retry for the next 5
+    # minutes, even once the provider recovers.
+    if succeeded:
+        _cache_set(cache_key, result or {})
     return result
 
 
@@ -258,20 +267,28 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT,
 
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     results: list[dict] = []
+    succeeded = False
 
     if api_key:
         try:
             results = _search_google(query, api_key, limit, lat=lat, lon=lon)
+            succeeded = True
         except Exception as exc:
             logger.warning("Google Places autocomplete failed, falling back: %s", exc)
             results = []
 
-    if not results:
+    if not succeeded:
         try:
             results = _search_photon(query, limit, lat=lat, lon=lon)
+            succeeded = True
         except Exception as exc:
             logger.warning("Photon autocomplete failed: %s", exc)
             results = []
 
-    _cache_set(cache_key, results)
+    # As above: only cache a completed lookup. A real zero-result answer
+    # (query succeeded, nothing matched -- e.g. a small business that just
+    # isn't in this provider's database) is worth caching; a failed request
+    # is not, or one Photon blip would hide results for 5 minutes afterward.
+    if succeeded:
+        _cache_set(cache_key, results)
     return results

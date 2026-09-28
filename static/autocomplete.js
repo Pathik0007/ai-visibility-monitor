@@ -108,11 +108,28 @@
       input.removeAttribute("aria-activedescendant");
     }
 
-    function render(results) {
+    // `searched: true` means a request actually completed with zero matches
+    // (as opposed to "hasn't searched yet") -- shown as a plain, unselectable
+    // note rather than just closing the list, so a real "not in our
+    // database" answer doesn't look identical to "nothing happened."
+    function render(results, opts) {
       currentResults = results;
       activeIndex = -1;
       list.innerHTML = "";
-      if (!results.length) { close(); return; }
+      if (!results.length) {
+        if (opts && opts.searched) {
+          var empty = document.createElement("li");
+          empty.className = "ac-empty";
+          empty.setAttribute("role", "presentation");
+          empty.textContent = "No matches -- you can still type it in manually.";
+          list.appendChild(empty);
+          list.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        } else {
+          close();
+        }
+        return;
+      }
       results.forEach(function (r, i) {
         var li = document.createElement("li");
         li.className = "ac-item";
@@ -190,16 +207,24 @@
       if (locationInput && result.location) locationInput.value = result.location;
     });
 
+    // Guards against a slow earlier response landing after a faster later
+    // one and overwriting it with stale results -- only the most recently
+    // *fired* request is allowed to render.
+    var requestSeq = 0;
     var runSearch = debounce(function (query) {
+      var seq = ++requestSeq;
       fetch(placesUrl(query, bias))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
-        .then(function (data) { widget.render((data && data.results) || []); })
+        .then(function (data) {
+          if (seq !== requestSeq) return; // a newer search has since started
+          widget.render((data && data.results) || [], { searched: true });
+        })
         .catch(function () { /* silent -- typing still works as a plain field */ });
     }, 300);
 
     nameInput.addEventListener("input", function () {
       var q = nameInput.value.trim();
-      if (q.length < 3) { widget.close(); return; }
+      if (q.length < 3) { requestSeq++; widget.close(); return; } // invalidate any in-flight response
       runSearch(q);
     });
   }
@@ -226,16 +251,21 @@
       input.focus();
     });
 
+    var requestSeq = 0;
     var runSearch = debounce(function (query) {
+      var seq = ++requestSeq;
       fetch(placesUrl(query, bias))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
-        .then(function (data) { widget.render((data && data.results) || []); })
+        .then(function (data) {
+          if (seq !== requestSeq) return; // a newer search has since started
+          widget.render((data && data.results) || [], { searched: true });
+        })
         .catch(function () { /* silent -- typing still works as a plain field */ });
     }, 300);
 
     input.addEventListener("input", function () {
       var seg = currentSegment();
-      if (seg.length < 3) { widget.close(); return; }
+      if (seg.length < 3) { requestSeq++; widget.close(); return; } // invalidate any in-flight response
       runSearch(seg);
     });
   }
