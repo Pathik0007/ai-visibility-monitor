@@ -33,7 +33,7 @@ from billing import billing_bp
 from alerts import check_business_and_alert, run_weekly_checks
 from ai_visibility.pipeline import run_visibility_check
 from ai_visibility.providers import ALL_PROVIDERS
-from places import search_places
+from places import search_places, geocode_location
 import report_cache
 
 IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
@@ -302,13 +302,36 @@ def sitemap_xml():
 def api_places():
     """Business-name autocomplete, called as-you-type from the form. Always
     returns 200 with a (possibly empty) list -- never a hard error -- so a
-    slow/unavailable lookup provider never breaks the underlying text field."""
+    slow/unavailable lookup provider never breaks the underlying text field.
+
+    Optional `lat`/`lon` (the frontend geocodes whatever's in the Location
+    field via /api/geocode and passes the result here) bias results toward
+    that point -- without it, a query like "nene chicken" ranks purely on
+    text fuzziness with no geography at all, so a branch on the other side
+    of the world can easily outrank the one actually near the user."""
     query = request.args.get("q", "")
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
     try:
-        results = search_places(query)
+        results = search_places(query, lat=lat, lon=lon)
     except Exception:
         results = []
     return {"results": results}
+
+
+@app.route("/api/geocode")
+@limiter.limit("30 per minute")
+def api_geocode():
+    """Turns free-text location input (the Location field) into a lat/lon,
+    used by the frontend to bias the business-name search above. Always
+    returns 200 -- {"lat": null, "lon": null} when nothing was found or the
+    lookup failed -- so it never breaks the form it's supporting."""
+    query = request.args.get("q", "")
+    try:
+        result = geocode_location(query)
+    except Exception:
+        result = None
+    return {"lat": (result or {}).get("lat"), "lon": (result or {}).get("lon")}
 
 
 @app.route("/check", methods=["POST"])

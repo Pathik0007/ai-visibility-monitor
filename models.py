@@ -100,3 +100,23 @@ class CheckRun(db.Model):
             avg_position=report["avg_position"],
             report_json=json.dumps(report),
         )
+
+
+class AnonymousReport(db.Model):
+    """A finished anonymous (no-login) visibility-check report, stored just
+    long enough to make its /check/<id> link shareable and refresh-safe.
+
+    This lives in the same database as everything else -- shared disk
+    storage on the one instance -- specifically so it survives running
+    behind more than one Gunicorn worker process. An earlier in-memory
+    version (report_cache.py) stored these in a plain per-process dict,
+    which meant the POST that computed a report and the GET that later
+    rendered its link could land on two different worker processes, and the
+    second one had never heard of that report id -- showing "report expired"
+    on every single check once the app ran with more than one worker."""
+    __tablename__ = "anonymous_report"
+    id = db.Column(db.String(32), primary_key=True)
+    category = db.Column(db.String(255))
+    location = db.Column(db.String(255))
+    report_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

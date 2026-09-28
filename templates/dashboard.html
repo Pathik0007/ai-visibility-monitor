@@ -58,16 +58,18 @@
     <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 style="margin-top:0;">Add a business to monitor</h3>
+      <label for="location">Location</label>
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
+      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Fill this in first -- it sharpens the business search below to your area.</p>
       <label for="name">Business name</label>
       <input id="name" name="name" required maxlength="200" autocomplete="off"
              data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
-      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category and location too.</p>
+      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category (and location, if you skipped it above).</p>
       <label for="category">Category</label>
       <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist (auto-fills if you pick a search result above)">
-      <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
       <label for="competitors">Competitors (comma-separated, optional, up to 10)</label>
-      <input id="competitors" name="competitors" maxlength="1000">
+      <input id="competitors" name="competitors" maxlength="1000"
+             data-autocomplete-multi="1" data-autocomplete-location="location">
       <button type="submit">Add &amp; run first check</button>
     </form>
     {% endif %}

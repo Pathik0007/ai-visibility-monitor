@@ -96,20 +96,31 @@ database migration needed.
 
 ## Business-name autocomplete
 
-The "Business name" field (on the homepage and on "add a business to
-monitor") searches as you type and, when you pick a result, also fills in
-category and location -- so you usually only type the name.
+The "Business name" and "Competitors" fields (homepage and "add a business
+to monitor") search as you type. Picking a Business-name result also fills
+in category and location; the Competitors field is comma-separated, so
+picking a result there only fills in the entry currently being typed,
+leaving earlier entries in the list untouched.
 
 - No setup needed: it uses Photon (photon.komoot.io), a free OpenStreetMap-based
   search API built for exactly this search-as-you-type use case, by default.
+- **Location-biased**: typing into the Location field geocodes it (debounced,
+  via `/api/geocode`) and that lat/lon is sent along with every Business-name
+  and Competitors search, so results are ranked toward the user's actual area
+  instead of purely on text-match fuzziness with no geography at all -- fill
+  in Location first (it's the first field for exactly this reason) for
+  meaningfully better results; a query like "nene chicken" without a location
+  bias can rank a branch on the other side of the world above the one
+  actually nearby.
 - Coverage caveat: the free path only suggests places that exist in
   OpenStreetMap's database. Well-known chains are reliably there; a small
   independent business may return zero suggestions even when everything is
   working correctly -- try a well-known chain first if you want to sanity-check
   the feature itself.
-- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places instead, for a
-  much larger place database; it automatically falls back to the free path if
-  the Google lookup ever fails.
+- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places (and Google's
+  Geocoding API for the location bias) instead, for a much larger place
+  database; it automatically falls back to the free path if the Google
+  lookup ever fails.
 - Entirely optional -- if the lookup is slow, blocked, or down, the fields
   just behave like plain text inputs. Nothing about submitting the form
   depends on it.
@@ -268,6 +279,34 @@ in full):
   subscription when Stripe isn't configured -- that combination would let
   anyone rack up metered API cost with no payment ever collected.
 
+**Third pass** (found on the actual multi-worker Render deployment, applied
+in full):
+
+- **"That report has expired" on every real check** -- the shareable report
+  link introduced in the second pass stored reports in an in-process dict.
+  Render's Gunicorn config runs more than one worker, so the worker that
+  handled `POST /check` was very often not the one the redirected
+  `GET /check/<id>` landed on, which had never heard of that report id --
+  meaning shared/bookmarked/even just-refreshed report links failed
+  constantly in production (they happened to work in local single-process
+  testing, which is why this wasn't caught earlier). Moved to a database
+  table (`anonymous_report`) so every worker process sees every saved
+  report; verified with two separate Python processes writing/reading the
+  same SQLite file to confirm it actually survives a cross-process handoff.
+- **Autocomplete suggestions were geographically irrelevant** -- searching a
+  business name with no location context ranks purely on Photon's text-match
+  fuzziness, so e.g. "nene chicken" surfaced branches in Singapore, Toronto
+  and Melbourne with no preference for the user's own area. Added
+  `/api/geocode` (debounced on the Location field) and pass the resulting
+  lat/lon as a bias into every Business-name and Competitors search; also
+  reordered the form so Location comes first, since the bias only helps once
+  it's filled in.
+- **No autocomplete on the Competitors field** -- it was a plain text input.
+  Added a multi-value-aware mode that searches and replaces only the
+  comma-separated segment currently being typed, leaving earlier entries
+  alone, and skips the category/location autofill (a competitor is just a
+  name).
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before
@@ -300,11 +339,15 @@ pointing real traffic at it:
 6. **Add real Stripe and SMTP credentials** (see above) once you're ready
    to actually bill and email people instead of running in demo mode.
 7. **Point an uptime monitor at `/healthz`**.
-8. **Shareable report links are per-process, in-memory** (`report_cache.py`)
-   -- fine for one process, but with multiple workers a link can 404 if it
-   lands on a worker that never computed that report. Swap it for Redis if
-   you need shareable links to reliably survive across workers (same
-   caveat, and same fix, as rate limiting above).
+8. **Shareable report links are database-backed** (`report_cache.py` writes
+   to the `anonymous_report` table via `models.py`) specifically so they
+   survive running behind more than one Gunicorn worker -- an earlier
+   in-memory version broke exactly this way: whichever worker handled the
+   `POST /check` was the only one that knew about the report, so the
+   redirected `GET /check/<id>` 404'd ("report expired") whenever it landed
+   on a different worker. No extra setup needed; it just rides on whatever
+   `DATABASE_URL` is already configured (SQLite locally, Postgres once you
+   move to it per item 3 above).
 
 ## What's still deliberately out of scope
 

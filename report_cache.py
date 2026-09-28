@@ -1,53 +1,74 @@
 """
-Short-lived in-memory cache for anonymous visibility-check reports.
+Storage for anonymous (no-login) visibility-check reports, so a report has
+its own shareable, refresh-safe link (GET /check/<id>) instead of only
+existing as the response to the POST /check form submit.
 
-Previously /check rendered report.html directly from the POST handler --
-refreshing the page re-submitted the form (running the whole check again,
-against real paid APIs once configured) and the URL couldn't be bookmarked
-or shared. Instead /check computes the report once, stores it here under a
-random id, and redirects (303) to GET /check/<id> -- the standard
-POST/redirect/GET pattern, so the report page is refresh-safe and shareable.
-
-In-memory and TTL-bound, the same pattern as places.py's lookup cache: fine
-for a single process. With more than one Gunicorn worker, a request can
-land on a worker that never computed a given report id -- if you need a
-shareable link that reliably survives that, swap this for Redis (see the
-"Going live" note in README, next to the same caveat for rate limiting).
+Backed by the app's own database (`AnonymousReport` in models.py) rather
+than an in-process dict. That matters specifically because a real deployment
+runs more than one Gunicorn worker process: an in-memory cache lives inside
+one worker's memory, so the POST /check that computes a report can land on
+worker A while the redirected GET /check/<id> lands on worker B -- which
+never heard of that report id, and shows "report expired" on essentially
+every check. The database is shared disk storage on the one instance, so
+every worker process sees every saved report.
 """
 
 from __future__ import annotations
-import time
-import uuid
+import json
+import secrets
+from datetime import datetime, timedelta
 
-_TTL_SECONDS = 60 * 60 * 24  # a day is plenty for "hey, check this out"
-_MAX_ENTRIES = 500
-
-_store: dict[str, tuple[float, dict]] = {}
-
-
-def _evict() -> None:
-    now = time.time()
-    for k in [k for k, (ts, _) in _store.items() if now - ts > _TTL_SECONDS]:
-        _store.pop(k, None)
-    if len(_store) > _MAX_ENTRIES:
-        oldest = sorted(_store.items(), key=lambda kv: kv[1][0])[: len(_store) - _MAX_ENTRIES]
-        for k, _ in oldest:
-            _store.pop(k, None)
+_TTL = timedelta(hours=24)
+_MAX_ROWS = 5000  # opportunistic cap so this table can't grow unbounded
 
 
 def save(report: dict, **meta) -> str:
+    from models import db, AnonymousReport
     _evict()
-    report_id = uuid.uuid4().hex[:16]
-    _store[report_id] = (time.time(), {"report": report, **meta})
+    report_id = secrets.token_hex(8)
+    row = AnonymousReport(
+        id=report_id,
+        category=meta.get("category"),
+        location=meta.get("location"),
+        report_json=json.dumps(report),
+    )
+    db.session.add(row)
+    db.session.commit()
     return report_id
 
 
 def get(report_id: str) -> dict | None:
-    entry = _store.get(report_id)
-    if entry is None:
+    from models import db, AnonymousReport
+    row = db.session.get(AnonymousReport, report_id)
+    if row is None:
         return None
-    ts, data = entry
-    if time.time() - ts > _TTL_SECONDS:
-        _store.pop(report_id, None)
+    if datetime.utcnow() - row.created_at > _TTL:
+        db.session.delete(row)
+        db.session.commit()
         return None
-    return data
+    return {
+        "report": json.loads(row.report_json),
+        "category": row.category,
+        "location": row.location,
+    }
+
+
+def _evict() -> None:
+    """Best-effort cleanup, run on every save rather than on a separate
+    schedule -- cheap enough (indexed column, small rows) and means no extra
+    cron/scheduler entry is needed just to keep this table tidy."""
+    from models import db, AnonymousReport
+    cutoff = datetime.utcnow() - _TTL
+    db.session.query(AnonymousReport).filter(AnonymousReport.created_at < cutoff).delete()
+    total = db.session.query(AnonymousReport).count()
+    if total > _MAX_ROWS:
+        overflow = total - _MAX_ROWS
+        stale_ids = [
+            r.id for r in
+            db.session.query(AnonymousReport.id)
+            .order_by(AnonymousReport.created_at.asc())
+            .limit(overflow)
+        ]
+        if stale_ids:
+            db.session.query(AnonymousReport).filter(AnonymousReport.id.in_(stale_ids)).delete(synchronize_session=False)
+    db.session.commit()

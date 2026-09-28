@@ -76,19 +76,21 @@
     <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Checking 5 assistants…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+      <label for="location">Location</label>
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
+      <p class="hint">Fill this in first — it sharpens the business search below to your area.</p>
+
       <label for="business">Business name</label>
       <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental"
              data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
-      <p class="hint">Start typing to search — picking a result auto-fills the category and location.</p>
+      <p class="hint">Start typing to search — picking a result auto-fills the category (and location, if you skipped it above).</p>
 
       <label for="category">Category</label>
       <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, Italian restaurant, plumber">
 
-      <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
-
       <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 10)</span></label>
-      <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care">
+      <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care"
+             data-autocomplete-multi="1" data-autocomplete-location="location">
 
       <label for="num_queries">Number of questions to test</label>
       <select id="num_queries" name="num_queries">

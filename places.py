@@ -46,7 +46,7 @@ DEFAULT_LIMIT = 5
 # Small in-memory cache so identical queries typed by many users (or by the
 # same user re-focusing the field) don't re-hit the external API every time,
 # and so we stay well within the free Photon instance's fair-use expectations.
-_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_CACHE: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 300  # seconds
 _CACHE_MAX_ENTRIES = 500
 
@@ -106,10 +106,19 @@ def _format_photon_address(props: dict) -> str:
     return ", ".join(parts)
 
 
-def _search_photon(query: str, limit: int) -> list[dict]:
+def _search_photon(query: str, limit: int, lat: float | None = None, lon: float | None = None) -> list[dict]:
+    params = {"q": query, "limit": limit, "lang": "en"}
+    if lat is not None and lon is not None:
+        # Biases (doesn't strictly filter) results toward this point -- without
+        # it, Photon ranks purely on text-match fuzziness with no geography at
+        # all, so a query like "nene chicken" can rank a Singapore or Toronto
+        # branch above the one actually near the location the user typed.
+        params["lat"] = lat
+        params["lon"] = lon
+        params["location_bias_scale"] = 1.0
     resp = requests.get(
         "https://photon.komoot.io/api/",
-        params={"q": query, "limit": limit, "lang": "en"},
+        params=params,
         headers={"User-Agent": "AI-Visibility-Monitor/1.0 (business-name autocomplete)"},
         timeout=REQUEST_TIMEOUT,
     )
@@ -129,6 +138,69 @@ def _search_photon(query: str, limit: int) -> list[dict]:
     return results
 
 
+def _geocode_photon(location_text: str) -> dict | None:
+    resp = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": location_text, "limit": 1, "lang": "en"},
+        headers={"User-Agent": "AI-Visibility-Monitor/1.0 (location geocoding)"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    features = resp.json().get("features", [])
+    if not features:
+        return None
+    coords = (features[0].get("geometry") or {}).get("coordinates")
+    if not coords or len(coords) < 2:
+        return None
+    lon, lat = coords[0], coords[1]  # GeoJSON order is [lon, lat]
+    return {"lat": lat, "lon": lon}
+
+
+def _geocode_google(location_text: str, api_key: str) -> dict | None:
+    resp = requests.get(
+        "https://maps.googleapis.com/maps/api/geocode/json",
+        params={"address": location_text, "key": api_key},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("status") != "OK" or not data.get("results"):
+        return None
+    loc = data["results"][0]["geometry"]["location"]
+    return {"lat": loc["lat"], "lon": loc["lng"]}
+
+
+def geocode_location(location_text: str) -> dict | None:
+    """Best-effort: turn free-text like "Parramatta, Sydney" into a
+    lat/lon so the business-name search below can be biased toward it.
+    Never raises -- a failure here should just mean an unbiased (global)
+    name search, not a broken page."""
+    location_text = (location_text or "").strip()
+    if len(location_text) < 3 or len(location_text) > MAX_QUERY_LEN:
+        return None
+
+    cache_key = f"geocode|{location_text.lower()}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached or None  # cached `{}` means "looked up, found nothing"
+
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    result = None
+    if api_key:
+        try:
+            result = _geocode_google(location_text, api_key)
+        except Exception as exc:
+            logger.warning("Google geocoding failed, falling back: %s", exc)
+    if not result:
+        try:
+            result = _geocode_photon(location_text)
+        except Exception as exc:
+            logger.warning("Photon geocoding failed: %s", exc)
+
+    _cache_set(cache_key, result or {})
+    return result
+
+
 def _map_google_types(types: list[str]) -> str:
     for t in types or []:
         if t not in _GENERIC_TYPES:
@@ -136,10 +208,17 @@ def _map_google_types(types: list[str]) -> str:
     return ""
 
 
-def _search_google(query: str, api_key: str, limit: int) -> list[dict]:
+def _search_google(query: str, api_key: str, limit: int, lat: float | None = None, lon: float | None = None) -> list[dict]:
+    params = {"input": query, "key": api_key, "types": "establishment"}
+    if lat is not None and lon is not None:
+        # "Bias", not "restrict": a strict location+radius filter would hide
+        # a real result just outside an arbitrary radius; this only pushes
+        # nearby matches higher, the same intent as Photon's lat/lon above.
+        params["location"] = f"{lat},{lon}"
+        params["radius"] = 50000
     resp = requests.get(
         "https://maps.googleapis.com/maps/api/place/autocomplete/json",
-        params={"input": query, "key": api_key, "types": "establishment"},
+        params=params,
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
@@ -159,13 +238,20 @@ def _search_google(query: str, api_key: str, limit: int) -> list[dict]:
     return results
 
 
-def search_places(query: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
-    """Look up business-name suggestions. Never raises -- worst case is []."""
+def search_places(query: str, limit: int = DEFAULT_LIMIT,
+                   lat: float | None = None, lon: float | None = None) -> list[dict]:
+    """Look up business-name suggestions. Never raises -- worst case is [].
+
+    `lat`/`lon`, when given, bias results toward that point -- pass the
+    geocoded coordinates of whatever the user has already typed into the
+    Location field so "nene chicken" ranks the branch actually near them
+    above unrelated branches on the other side of the world."""
     query = (query or "").strip()
     if len(query) < 3 or len(query) > MAX_QUERY_LEN:
         return []
 
-    cache_key = f"{query.lower()}|{limit}"
+    bias_key = f"{round(lat, 2)},{round(lon, 2)}" if lat is not None and lon is not None else "nobias"
+    cache_key = f"{query.lower()}|{limit}|{bias_key}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -175,14 +261,14 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
 
     if api_key:
         try:
-            results = _search_google(query, api_key, limit)
+            results = _search_google(query, api_key, limit, lat=lat, lon=lon)
         except Exception as exc:
             logger.warning("Google Places autocomplete failed, falling back: %s", exc)
             results = []
 
     if not results:
         try:
-            results = _search_photon(query, limit)
+            results = _search_photon(query, limit, lat=lat, lon=lon)
         except Exception as exc:
             logger.warning("Photon autocomplete failed: %s", exc)
             results = []
