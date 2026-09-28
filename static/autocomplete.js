@@ -30,10 +30,21 @@
     nameInput.parentNode.insertBefore(wrap, nameInput);
     wrap.appendChild(nameInput);
 
+    var listId = nameId + "-ac-list";
     var list = document.createElement("ul");
     list.className = "ac-list";
+    list.id = listId;
+    list.setAttribute("role", "listbox");
     list.hidden = true;
     wrap.appendChild(list);
+
+    // ARIA combobox wiring so screen-reader users get the same "here are
+    // suggestions" signal sighted users get from the dropdown appearing.
+    nameInput.setAttribute("role", "combobox");
+    nameInput.setAttribute("aria-autocomplete", "list");
+    nameInput.setAttribute("aria-expanded", "false");
+    nameInput.setAttribute("aria-controls", listId);
+    nameInput.setAttribute("autocomplete", "off");
 
     var currentResults = [];
     var activeIndex = -1;
@@ -44,6 +55,8 @@
       list.innerHTML = "";
       currentResults = [];
       activeIndex = -1;
+      nameInput.setAttribute("aria-expanded", "false");
+      nameInput.removeAttribute("aria-activedescendant");
     }
 
     function selectResult(result) {
@@ -64,6 +77,7 @@
       results.forEach(function (r, i) {
         var li = document.createElement("li");
         li.className = "ac-item";
+        li.id = listId + "-" + i;
         li.setAttribute("role", "option");
         var main = document.createElement("div");
         main.className = "ac-item-name";
@@ -83,13 +97,16 @@
         list.appendChild(li);
       });
       list.hidden = false;
+      nameInput.setAttribute("aria-expanded", "true");
     }
 
     function setActive(index) {
       var items = list.querySelectorAll(".ac-item");
-      items.forEach(function (el) { el.classList.remove("ac-item-active"); });
+      items.forEach(function (el) { el.classList.remove("ac-item-active"); el.setAttribute("aria-selected", "false"); });
       if (index >= 0 && index < items.length) {
         items[index].classList.add("ac-item-active");
+        items[index].setAttribute("aria-selected", "true");
+        nameInput.setAttribute("aria-activedescendant", items[index].id);
         activeIndex = index;
       }
     }
@@ -138,4 +155,19 @@
   }
 
   window.attachPlaceAutocomplete = attachPlaceAutocomplete;
+
+  // Auto-init from data attributes instead of a per-page inline <script>
+  // block -- keeps every page's Content-Security-Policy free of
+  // 'unsafe-inline' for scripts. Add data-autocomplete-name to the name
+  // field, with data-autocomplete-category / data-autocomplete-location
+  // pointing at the ids of the fields to auto-fill.
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("[data-autocomplete-name]").forEach(function (input) {
+      attachPlaceAutocomplete(
+        input.id,
+        input.getAttribute("data-autocomplete-category") || null,
+        input.getAttribute("data-autocomplete-location") || null
+      );
+    });
+  });
 })();

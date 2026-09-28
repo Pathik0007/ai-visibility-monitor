@@ -21,7 +21,7 @@ class PerplexityProvider(BaseProvider):
                 "model": "sonar",
                 "messages": [{"role": "user", "content": query}],
             },
-            timeout=30,
+            timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()

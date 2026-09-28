@@ -7,7 +7,7 @@
   --border-soft: #1c212b;
   --text: #eef1f5;
   --muted: #99a1b0;
-  --muted-dim: #6b7280;
+  --muted-dim: #8b93a1;
   --accent: #6c8cff;
   --accent-2: #8b5cf6;
   --accent-glow: rgba(108, 140, 255, 0.25);
@@ -170,6 +170,16 @@ button, .btn {
 }
 button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 26px var(--accent-glow); }
 button:active, .btn:active { transform: translateY(0); }
+button:disabled, .btn:disabled {
+  opacity: 0.75; cursor: default; transform: none;
+}
+button:disabled:hover, .btn:disabled:hover { transform: none; box-shadow: 0 4px 18px var(--accent-glow); }
+.spinner {
+  display: inline-block; width: 15px; height: 15px;
+  border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn-ghost {
   background: transparent; border: 1px solid var(--border);
   color: var(--text); box-shadow: none; width: auto; margin: 0;
@@ -329,6 +339,29 @@ a.back:hover { color: var(--accent); text-decoration: none; }
 .ac-item-name { font-size: 0.92rem; color: var(--text); font-weight: 500; }
 .ac-item-sub { font-size: 0.76rem; color: var(--muted-dim); margin-top: 2px; }
 .ac-item-active, .ac-item:hover { background: var(--card-hover); }
+
+/* ---------- error pages ---------- */
+.error-page { text-align: center; padding: 80px 0; }
+.error-page .code {
+  font-size: 5rem; font-weight: 800; letter-spacing: -0.03em;
+  background: linear-gradient(180deg, #ffffff, #b9c2d6);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  margin: 0;
+}
+.error-page h1 { font-size: 1.5rem; margin: 8px 0 10px; }
+.error-page p { color: var(--muted); max-width: 440px; margin: 0 auto 24px; }
+
+/* ---------- legal / marketing pages ---------- */
+.prose h2 { margin-top: 32px; }
+.prose p, .prose li { color: var(--muted); }
+.prose strong { color: var(--text); }
+.faq-item { padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
+.faq-item:last-child { border-bottom: none; }
+.faq-item h3 { margin: 0 0 6px; }
+.faq-item p { color: var(--muted); margin: 0; }
+.pricing-card { text-align: center; }
+.price { font-size: 2.6rem; font-weight: 800; letter-spacing: -0.02em; margin: 6px 0; }
+.price span { font-size: 1rem; font-weight: 500; color: var(--muted); }
 
 /* ---------- responsive ---------- */
 @media (max-width: 560px) {

@@ -3,6 +3,7 @@
 <head><meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow"><title>{{ business.name }} -- AI Visibility Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
@@ -15,7 +16,7 @@
       {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
     {% endwith %}
 
-    <form method="POST" action="{{ url_for('run_business_now', business_id=business.id) }}">
+    <form method="POST" action="{{ url_for('run_business_now', business_id=business.id) }}" data-loading-text="Checking 5 assistants…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit">Run check now</button>
     </form>
@@ -99,5 +100,6 @@
       </table>
     </div>
   </div>
+  <script src="/static/form-loading.js" defer></script>
 </body>
 </html>

@@ -15,19 +15,37 @@ from models import db
 billing_bp = Blueprint("billing", __name__, url_prefix="/billing")
 
 PRICE_ID = os.environ.get("STRIPE_PRICE_ID")
+IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
 
 
 def _stripe_configured() -> bool:
     return bool(os.environ.get("STRIPE_SECRET_KEY")) and bool(PRICE_ID)
 
 
+def _any_real_provider_configured() -> bool:
+    """True once at least one paid AI-assistant API key is set. Each
+    "monitored business" runs real, metered API calls weekly -- auto-granting
+    unlimited free "demo" subscriptions once those keys (and their bills)
+    are live would let anyone rack up API cost with no payment ever
+    collected. Demo mode is only safe to auto-grant while every provider is
+    still in free simulated-answer mode."""
+    from ai_visibility.providers import ALL_PROVIDERS
+    return any(p.is_configured() for p in ALL_PROVIDERS)
+
+
 @billing_bp.route("/checkout")
 @login_required
 def checkout():
     if not _stripe_configured():
+        if _any_real_provider_configured():
+            flash("Sign-ups are paused right now while billing is being finished -- please check back soon.")
+            return redirect(url_for("dashboard"))
         current_user.subscription_status = "demo"
         db.session.commit()
-        flash("Stripe isn't configured yet, so this subscribed you in demo mode -- no charge made. Add STRIPE_SECRET_KEY and STRIPE_PRICE_ID in .env to take real payments.")
+        msg = "This subscribed you in demo mode -- no charge made."
+        if not IS_PRODUCTION:
+            msg += " Add STRIPE_SECRET_KEY and STRIPE_PRICE_ID in .env to take real payments."
+        flash(msg)
         return redirect(url_for("dashboard"))
 
     stripe.api_key = os.environ["STRIPE_SECRET_KEY"]

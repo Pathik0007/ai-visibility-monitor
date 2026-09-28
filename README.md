@@ -1,8 +1,8 @@
 # AI Visibility Monitor
 
-Checks whether ChatGPT, Claude, Perplexity and Gemini recommend a local
-business (or a competitor) for realistic "best X near me" questions, turns
-that into a visibility score and a plain-English fix list, and -- for
+Checks whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend a
+local business (or a competitor) for realistic "best X near me" questions,
+turns that into a visibility score and a plain-English fix list, and -- for
 subscribed accounts -- re-checks automatically every week and emails an
 alert when something meaningful changes.
 
@@ -46,6 +46,16 @@ are simulated (tagged "demo" in the UI):
 
 Each is a paid, pay-as-you-go API (small cents-per-query cost) -- not the
 same login as the consumer chat apps.
+
+**How each one actually answers**: Claude and Gemini are called with their
+live web-search tool turned on, so their answers reflect the current web,
+not just training data. ChatGPT and DeepSeek are called via their plain
+chat-completions APIs, which answer from training data only -- there's no
+web-search tool available on those endpoints the way there is for Claude and
+Gemini today. Perplexity is inherently search-based. This is noted directly
+on each report (see the per-assistant "why a specific assistant might be
+missing you" notes) so a low ChatGPT/DeepSeek score isn't mistaken for a
+website problem when it's really a training-data-recency one.
 
 **Stripe billing** -- no `STRIPE_SECRET_KEY`/`STRIPE_PRICE_ID` -> clicking
 "Subscribe" instantly flips the account to a demo subscription, no charge,
@@ -183,17 +193,94 @@ issues turned up (and fixed) these:
   with more than one worker would check (and email) every business
   multiple times over. See "Going live" below for the fix.
 
+**Second pass** (SEO/AI-optimisation/security/traffic-handling audit, applied
+in full):
+
+- **Gemini API key leak** -- the key traveled in the request URL, so a
+  failed call's error text (shown directly on the public report page) could
+  echo it back. Moved to the `x-goog-api-key` header; every provider error
+  message is also now scrubbed of any configured secret as a second line of
+  defense.
+- **Security headers** -- added `Content-Security-Policy`, `X-Frame-Options`,
+  `X-Content-Type-Options`, `Strict-Transport-Security` and
+  `Referrer-Policy` on every response. All inline `<script>` blocks were
+  moved into external `/static/*.js` files (auto-initializing from `data-*`
+  attributes) so `script-src` can stay locked to `'self'` with no
+  `'unsafe-inline'` exception.
+- **Wrong client IP / scheme behind the proxy** -- Render (and most PaaS
+  hosts) terminate TLS at a reverse proxy in front of the app, so without
+  `ProxyFix` every request looked like it came from the proxy's own IP
+  (breaking per-visitor rate limiting) and over plain HTTP (breaking
+  `https://` canonical/sitemap URLs). Added `werkzeug.middleware.proxy_fix`.
+- **Broken rate-limit page** -- hitting a rate limit used to `redirect(...),
+  429`, which does nothing useful: browsers only follow redirects on 3xx
+  responses, so visitors saw a bare, unstyled "Redirecting..." page. Now
+  renders a proper branded error page directly, alongside new custom 404 and
+  500 pages.
+- **`num_queries` could 500** -- a non-numeric value crashed with an
+  unhandled `ValueError`; now falls back to the default instead.
+- **Analyzer false positives/negatives** -- name matching is now
+  whole-word (so "Ace" no longer matches inside "Palace"), normalizes curly
+  quotes and "&"/"and", detects markdown-heading-prefixed list items
+  (`### 1. Foo`), and discovers competitors the assistant named that the
+  user never typed in.
+- **`num_queries` silently ignored** -- with a Claude key configured, the
+  truncation logic only fired when there were *fewer* queries than
+  requested, so the optional LLM-generated extras could push the total over
+  (or leave it under) what was asked for. Now always truncates to exactly
+  `num_queries`.
+- **Self-naming query inflated scores** -- one template literally asked "Is
+  {business} a good {category}...", which obviously always mentions the
+  business. Removed -- every query now tests whether the assistant
+  recommends the business *unprompted*.
+- **Category-matching false positives** -- plain substring matching mapped
+  "barber" to restaurants (via "bar"), "chair hire" to salons (via "hair"),
+  "carpet store" and "corvette repairs" to veterinary (via "pet"/"vet"),
+  "publishing house" to restaurants (via "pub"), and "dinner cruise" to
+  accommodation (via "inn"). Switched to whole-word/whole-phrase matching
+  and added missing coverage (seafood/sushi, physio/chiropractic, florists).
+- **Non-shareable, resubmission-prone reports** -- the anonymous report used
+  to render straight from the `POST /check` handler, so refreshing the page
+  re-ran (and would re-bill) the whole check, and the URL couldn't be
+  bookmarked or shared. Now post/redirect/get: `report_cache.py` stores the
+  finished report under a short-lived id and `GET /check/<id>` renders it.
+- **SEO** -- trimmed the title/description to search-engine length limits,
+  added Open Graph + Twitter Card tags and a generated share image, JSON-LD
+  (`SoftwareApplication` on the homepage, `FAQPage` on `/faq`), a proper
+  favicon, and real indexable marketing pages (`/pricing`, `/faq`, `/about`,
+  `/how-it-works`, `/privacy`, `/terms`), all listed in `sitemap.xml`.
+- **AI-crawler optimisation** -- added `/llms.txt`, a plain-language summary
+  of what the product does, for assistants/crawlers that read it.
+- **Accessibility** -- `--muted-dim` text failed WCAG AA contrast (3.67:1)
+  against the card background; lightened to pass (5.7:1+). The autocomplete
+  dropdown now exposes proper ARIA combobox/listbox roles.
+- **UX polish** -- submit buttons show a spinner and disable themselves
+  while a check runs (a real check takes several seconds); the "every
+  question asked" section is now grouped by question instead of one long
+  flat list; dev-facing "see README.md"/".env" hints are hidden once
+  `FLASK_ENV=production`.
+- **Traffic-handling** -- switched Gunicorn to threaded workers (better for
+  I/O-bound provider calls), reduced each provider's timeout from 30s to
+  15s, pinned every dependency version (and added `.python-version`) so a
+  deploy can't silently pick up an untested Python/library version.
+- **Billing cost-exposure guard** -- once a real (paid) AI provider key is
+  configured, `/billing/checkout` no longer auto-grants a free "demo"
+  subscription when Stripe isn't configured -- that combination would let
+  anyone rack up metered API cost with no payment ever collected.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before
 pointing real traffic at it:
 
 1. **Run multiple workers with a real WSGI server**, not Flask's dev
-   server: `pip install -r requirements-prod.txt` then
-   `gunicorn app:app --workers 3 --timeout 60` (a `Procfile` is included
-   for Render/Heroku-style platforms). `--timeout 60` gives headroom for a
-   real multi-provider check; if your host's own reverse proxy has a
-   shorter timeout (many default to ~30s), raise it or lower `num_queries`.
+   server: `pip install -r requirements-prod.txt` then use the included
+   `Procfile` (`gunicorn app:app --workers 2 --threads 4 --worker-class
+   gthread --timeout 30 --graceful-timeout 30`) for Render/Heroku-style
+   platforms. Threaded workers suit this app well since each request mostly
+   waits on outbound AI-API calls rather than using CPU; raise `--timeout`
+   or lower `num_queries` if your host's own reverse proxy has a shorter
+   timeout than the providers' now-15s-each call budget needs.
 2. **Turn off the in-process scheduler and use `scheduled_job.py` instead**:
    set `ENABLE_INPROCESS_SCHEDULER=0` and point your host's cron/scheduled-job
    feature (or a plain crontab) at `python scheduled_job.py` weekly. Running
@@ -213,6 +300,11 @@ pointing real traffic at it:
 6. **Add real Stripe and SMTP credentials** (see above) once you're ready
    to actually bill and email people instead of running in demo mode.
 7. **Point an uptime monitor at `/healthz`**.
+8. **Shareable report links are per-process, in-memory** (`report_cache.py`)
+   -- fine for one process, but with multiple workers a link can 404 if it
+   lands on a worker that never computed that report. Swap it for Redis if
+   you need shareable links to reliably survive across workers (same
+   caveat, and same fix, as rate limiting above).
 
 ## What's still deliberately out of scope
 

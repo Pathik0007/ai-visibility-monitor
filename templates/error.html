@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{{ title }} -- AI Visibility Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <nav class="topnav">
+      <div class="brand"><span class="logo">◎</span> AI Visibility Monitor</div>
+    </nav>
+    <div class="error-page">
+      <p class="code">{{ code }}</p>
+      <h1>{{ title }}</h1>
+      <p>{{ message }}</p>
+      <a class="btn" style="display:inline-flex; width:auto;" href="{{ url_for('index') }}">Back to home</a>
+    </div>
+  </div>
+</body>
+</html>

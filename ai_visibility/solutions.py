@@ -8,84 +8,115 @@ value here is category-specific concreteness, not false certainty.
 """
 
 from __future__ import annotations
+import re
 
 # (keywords to match against the free-text category field, label used in the
 # UI, ordered list of the highest-leverage actions for that kind of business)
 _CATEGORY_PLAYBOOKS: list[tuple[list[str], str, list[str]]] = [
-    (["restaurant", "cafe", "café", "coffee", "bar", "pub", "bakery", "diner", "pizza", "food truck"], "restaurants & cafes", [
+    (["restaurant", "restaurants", "cafe", "cafes", "café", "cafés", "coffee", "coffee shop", "bar", "pub",
+      "bakery", "bakeries", "diner", "diners", "pizza", "pizzeria", "food truck", "food trucks",
+      "seafood", "sushi", "fish and chips", "fish & chips"], "restaurants & cafes", [
         "Complete Google Business Profile, Yelp and TripAdvisor listings with your full menu, price range, photos and current hours.",
         "Get onto delivery-app listings (UberEats/DoorDash/Menulog) if relevant -- these get scraped and cited too.",
         "Ask happy customers to leave reviews that name specific dishes, not just star ratings -- assistants latch onto specifics.",
         "Pitch local food bloggers or your city's \"best [cuisine] in [area]\" roundup articles -- these listicles are exactly the kind of page AI assistants learn to cite.",
         "Add Restaurant structured data (JSON-LD schema) to your website: cuisine, price range, opening hours.",
     ]),
-    (["dentist", "dental"], "dental practices", [
+    (["dentist", "dentists", "dental"], "dental practices", [
         "Complete your Google Business Profile: services offered, insurance accepted, hours, photos of the practice.",
         "List on health directories relevant to your area (Healthgrades, Zocdoc, or your country's equivalent).",
         "Encourage patients to leave reviews naming specific treatments (e.g. \"root canal\", \"Invisalign\") -- generic 5-star reviews carry less signal than specific ones.",
         "Try to get featured in local \"best dentist in [suburb]\" articles or your local paper's health/wellness coverage.",
         "Add MedicalBusiness/Dentist structured data to your site.",
     ]),
-    (["doctor", "physician", "clinic", "medical centre", "medical center", "gp "], "medical practices", [
+    (["physio", "physios", "physiotherapy", "physiotherapist", "physiotherapists",
+      "chiropractor", "chiropractors", "chiropractic", "osteopath", "osteopaths", "osteopathy"], "physio & chiropractic clinics", [
+        "Complete your Google Business Profile: conditions treated, hours, and whether direct health-fund billing is offered.",
+        "List on relevant local health directories.",
+        "Encourage patients to leave reviews naming the specific condition or treatment (e.g. \"lower back pain\", \"sports injury\") -- generic reviews carry less signal.",
+        "Try to get featured in local \"best physio/chiro in [suburb]\" articles or sports-club partnership pages that link back to you.",
+        "Add MedicalBusiness structured data to your website.",
+    ]),
+    (["vet", "vets", "veterinary", "veterinarian", "veterinarians", "animal hospital", "animal hospitals", "pet"], "veterinary practices", [
+        "Complete Google Business Profile with services, emergency availability, and hours.",
+        "List on local pet-care directories.",
+        "Encourage reviews naming the specific pet care provided.",
+        "Get featured in local \"best vet in [area]\" content if it exists.",
+    ]),
+    # NOTE: this bucket's "clinic" keyword is intentionally generic (plain
+    # GP/medical clinics) -- physio/chiro and veterinary are listed above it
+    # so categories like "physiotherapy clinic" or "veterinary clinic" match
+    # the more specific playbook first.
+    (["doctor", "doctors", "physician", "physicians", "clinic", "clinics",
+      "medical centre", "medical center", "gp"], "medical practices", [
         "Complete your Google Business Profile with services, hours, and accepted insurance/health funds.",
         "List on relevant local health directories.",
         "Encourage patients to review specific aspects of care (wait times, bedside manner, specific services) rather than generic ratings.",
         "Ensure your practice appears in local health directories and any hospital/network \"find a doctor\" pages that link back to you.",
         "Add MedicalBusiness structured data to your website.",
     ]),
-    (["lawyer", "attorney", "legal", "law firm"], "law firms", [
+    (["lawyer", "lawyers", "attorney", "attorneys", "legal", "law firm", "law firms"], "law firms", [
         "Complete profiles on legal directories (Avvo, FindLaw, or your region's equivalent) and Google Business Profile.",
         "Get reviews that name the specific practice area handled (e.g. \"family law\", \"conveyancing\").",
         "Contribute a quote or article to local news or legal blogs covering your practice area -- press mentions get picked up broadly.",
         "Add LegalService structured data to your website listing practice areas.",
     ]),
-    (["salon", "spa", "barber", "hair", "nail", "beauty"], "salons & spas", [
+    (["florist", "florists", "flower", "flowers"], "florists", [
+        "Complete your Google Business Profile with delivery area, same-day delivery availability, and photos of arrangements.",
+        "List on flower-delivery marketplaces (e.g. your country's equivalent of Bloom & Wild/Interflora) if relevant -- these get cited too.",
+        "Encourage reviews naming the occasion (wedding, funeral, same-day delivery) -- assistants latch onto specifics over generic praise.",
+        "Pitch local wedding/event blogs for inclusion in \"best florists in [area]\" roundups.",
+    ]),
+    (["salon", "salons", "spa", "spas", "barber", "barbers", "barbershop",
+      "hair", "hairdresser", "hairdressers", "nail", "nails", "beauty"], "salons & spas", [
         "Complete Google Business Profile and booking-platform listings (Booksy, Fresha, or similar) with services and pricing.",
         "Keep an active, tagged Instagram/social presence -- image-heavy platforms get referenced in broader web content about local businesses.",
         "Ask clients for reviews naming specific services (balayage, gel manicure, etc.).",
         "Pitch local \"best salons in [area]\" style roundups.",
     ]),
-    (["gym", "fitness", "yoga", "pilates", "crossfit", "personal train"], "fitness studios", [
+    (["gym", "gyms", "fitness", "yoga", "pilates", "crossfit",
+      "personal trainer", "personal trainers", "personal training"], "fitness studios", [
         "Complete Google Business Profile and class-booking platform listings (Mindbody, ClassPass) with class types and schedule.",
         "Encourage reviews naming specific classes, instructors or programs.",
         "Get listed in local \"best gyms/studios in [area]\" articles.",
         "Add LocalBusiness/ExerciseGym structured data to your site.",
     ]),
-    (["hotel", "motel", "resort", "accommodation", "bnb", "b&b", "inn"], "accommodation", [
+    (["hotel", "hotels", "motel", "motels", "resort", "resorts", "accommodation", "bnb", "b&b", "inn", "inns"], "accommodation", [
         "Keep Google Business Profile, Booking.com, TripAdvisor and Expedia listings fully complete with current photos and amenities.",
         "Encourage reviews mentioning specific amenities (pool, breakfast, parking, room type).",
         "Respond to reviews -- assistants and travel platforms both weight active, responsive listings.",
         "Add Hotel/LodgingBusiness structured data to your website.",
     ]),
-    (["plumb", "electric", "hvac", "roofing", "landscap", "handyman", "contractor", "builder", "renovat", "clean"], "home services / trades", [
+    (["plumber", "plumbers", "plumbing", "electrician", "electricians", "electrical",
+      "hvac", "roofing", "roofer", "roofers", "landscaping", "landscaper", "landscapers",
+      "handyman", "handymen", "contractor", "contractors", "builder", "builders",
+      "renovation", "renovations", "renovator", "renovators", "cleaning", "cleaner", "cleaners"], "home services / trades", [
         "Google Business Profile is the single highest-leverage thing here -- keep service area, hours and services offered complete and current.",
         "List on trade directories relevant to your country (Angi, HomeAdvisor, Thumbtack, hipages, Airtasker) and Nextdoor.",
         "Get reviews naming the specific job done and how fast you responded -- \"same-day\" and specific fixes are exactly what local-intent questions ask about.",
         "Add clear, separate service-area and service-type pages to your website (e.g. \"emergency plumber in [suburb]\") rather than one generic page.",
     ]),
-    (["mechanic", "auto repair", "car repair", "tyre", "tire", "panel beat", "smash repair"], "auto repair", [
+    (["mechanic", "mechanics", "auto repair", "car repair", "car repairs", "tyre", "tyres", "tire", "tires",
+      "panel beating", "panel beater", "panel beaters", "smash repair", "smash repairs"], "auto repair", [
         "Complete Google Business Profile with the specific services and vehicle makes you handle.",
         "List on auto-specific directories (RepairPal, or your region's equivalent) and Yelp.",
         "Encourage reviews naming the specific repair or service done.",
         "Get featured in local \"best mechanic in [area]\" content if any exists.",
     ]),
-    (["real estate", "realtor", "property agent", "estate agent"], "real estate agents", [
+    (["real estate", "realtor", "realtors", "property agent", "property agents",
+      "estate agent", "estate agents"], "real estate agents", [
         "Complete your Zillow/Realtor.com/Domain/REA profile and Google Business Profile.",
         "Collect client reviews that name specific suburbs/neighbourhoods you closed deals in.",
         "Contribute local market commentary to news outlets or your own blog covering specific suburbs -- this is exactly the locally-specific content assistants draw on.",
     ]),
-    (["account", "bookkeep", "tax agent", "tax prep", "financial advis"], "accounting & financial services", [
+    (["accountant", "accountants", "accounting", "bookkeeper", "bookkeepers", "bookkeeping",
+      "tax agent", "tax agents", "tax preparation", "tax prep",
+      "financial advisor", "financial advisors", "financial adviser", "financial advisers"], "accounting & financial services", [
         "Complete your Google Business Profile and any relevant professional directory listing.",
         "Encourage reviews naming the specific service used (tax return, bookkeeping, BAS, SMSF, etc.).",
         "Contribute commentary to local business news covering topics in your specialty.",
     ]),
-    (["vet", "veterinar", "animal hospital", "pet"], "veterinary practices", [
-        "Complete Google Business Profile with services, emergency availability, and hours.",
-        "List on local pet-care directories.",
-        "Encourage reviews naming the specific pet care provided.",
-        "Get featured in local \"best vet in [area]\" content if it exists.",
-    ]),
-    (["tutor", "school", "education", "training", "course", "academy"], "education & tutoring", [
+    (["tutor", "tutors", "tutoring", "school", "schools", "education", "training", "academy", "academies"], "education & tutoring", [
         "Complete Google Business Profile with subjects/programs offered.",
         "Encourage parent/student reviews naming specific subjects or outcomes.",
         "Get listed on local parent-community forums or school-recommendation lists -- these get referenced widely.",
@@ -129,10 +160,17 @@ _DISCLAIMER = ("Exactly how each assistant decides what to mention isn't publish
 
 
 def match_category_playbook(category: str) -> tuple[str, list[str]]:
+    """Word-boundary match against the free-text category field. Plain
+    substring matching used to cause false positives like "barber" -> "bar",
+    "chair hire" -> "hair", "carpet store" -> "pet", "corvette repairs" ->
+    "vet", "publishing house" -> "pub" and "dinner cruise" -> "inn" -- all
+    fixed by requiring the keyword to appear as a whole word (or whole
+    phrase, for multi-word keywords)."""
     category_lower = (category or "").lower()
     for keywords, label, actions in _CATEGORY_PLAYBOOKS:
-        if any(kw in category_lower for kw in keywords):
-            return label, actions
+        for kw in keywords:
+            if re.search(r"\b" + re.escape(kw.strip()) + r"\b", category_lower):
+                return label, actions
     return _GENERIC_PLAYBOOK
 
 

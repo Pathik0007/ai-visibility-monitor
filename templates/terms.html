@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terms of Service -- AI Visibility Monitor</title>
+  <meta name="description" content="Terms for using AI Visibility Monitor's free check and paid monitoring subscription.">
+  <link rel="canonical" href="{{ url_for('terms', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+  </nav>
+  <div class="wrap">
+    <h1>Terms of Service</h1>
+    <p class="sub">Last updated {{ updated_date }}.</p>
+    <div class="card prose">
+      <h2>The service</h2>
+      <p>AI Visibility Monitor tests whether AI assistants mention a given business in response to sample questions, and summarizes the result. Results reflect what those third-party assistants returned at the time of the check -- we don't control, and can't guarantee, what any assistant says at any given moment.</p>
+      <h2>No guarantee of outcome</h2>
+      <p>The action plan is general, good-faith guidance based on common patterns, not a guarantee that following it will change any assistant's output. Exactly how each assistant decides what to mention isn't published by its maker and can change at any time.</p>
+      <h2>Accounts and subscriptions</h2>
+      <p>You're responsible for the accuracy of what you submit and for keeping your account credentials secure. Paid subscriptions renew monthly until canceled; cancel any time from your dashboard or by contacting us.</p>
+      <h2>Acceptable use</h2>
+      <p>Don't use the service to harass, defame, or submit information about a business you don't have a legitimate reason to be checking, or to abuse rate limits or attempt to disrupt the service.</p>
+      <h2>Changes</h2>
+      <p>We may update these terms or the service itself over time; continued use after a change means you accept the updated terms.</p>
+    </div>
+  </div>
+</body>
+</html>

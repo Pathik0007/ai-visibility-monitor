@@ -10,6 +10,7 @@ slowest single call instead of the sum of all of them.
 """
 
 from __future__ import annotations
+import os
 from concurrent.futures import ThreadPoolExecutor
 from .query_generator import generate_queries
 from .providers import ALL_PROVIDERS
@@ -19,6 +20,23 @@ from .report import build_report
 from .demo_mode import generate_mock_answer
 
 MAX_WORKERS = 8
+
+_SECRET_ENV_MARKERS = ("_API_KEY", "_SECRET", "_TOKEN", "_KEY")
+
+
+def _redact_secrets(text: str) -> str:
+    """Defense in depth: strip any configured API key/secret value out of an
+    error message before it's ever shown to a user. The Gemini provider used
+    to put its key in the request URL, which meant a failed call's error
+    text (surfaced directly on the public report page) could leak it --
+    fixed at the source by moving the key to a header, but a provider's own
+    error string, a proxy, or a future provider could still echo a secret
+    back verbatim, so every configured secret is scrubbed here too."""
+    for name, value in os.environ.items():
+        if value and len(value) >= 6 and any(name.endswith(m) for m in _SECRET_ENV_MARKERS):
+            if value in text:
+                text = text.replace(value, "[redacted]")
+    return text
 
 
 def _run_one(query: str, provider, business: str, category: str, location: str,
@@ -35,10 +53,11 @@ def _run_one(query: str, provider, business: str, category: str, location: str,
             is_demo = True
             raw_text = generate_mock_answer(query, business, category, location, competitors, seed)
         except Exception as exc:
+            safe_message = _redact_secrets(str(exc))
             return {
                 "provider": provider.display_name, "query": query,
                 "mentioned": False, "position": None,
-                "competitors_mentioned": [], "raw_text": f"[Error calling {provider.display_name}: {exc}]",
+                "competitors_mentioned": [], "raw_text": f"[Error calling {provider.display_name}: {safe_message}]",
                 "is_demo": is_demo, "error": True,
             }
 

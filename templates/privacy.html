@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy -- AI Visibility Monitor</title>
+  <meta name="description" content="What AI Visibility Monitor stores, why, and for how long.">
+  <link rel="canonical" href="{{ url_for('privacy', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+  </nav>
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="sub">Last updated {{ updated_date }}.</p>
+    <div class="card prose">
+      <h2>What we collect</h2>
+      <p>A free, anonymous check submits the business name, category, location and any competitor names you type, purely to generate the report -- this is not tied to an identity and is only kept briefly (see below).</p>
+      <p>Creating an account stores your email address and a securely hashed password (never the password itself). If you subscribe, Stripe -- not us -- holds your payment details; we only store a subscription status and Stripe's own customer/subscription identifiers.</p>
+      <p>Saved businesses store the same business/category/location/competitor fields you provide, plus each check's results, so you can see your visibility history over time.</p>
+      <h2>How long we keep it</h2>
+      <p>An anonymous check's report is kept only long enough to make its link shareable and refreshable (currently 24 hours), then discarded. Saved-business history is kept for as long as your account exists.</p>
+      <h2>Third parties</h2>
+      <p>Running a check sends your submitted business details to whichever AI assistant APIs are configured (OpenAI, Anthropic, Perplexity, Google, DeepSeek) purely to ask the test question -- the same way any tool that calls those APIs would. Payment processing, when enabled, is handled entirely by Stripe.</p>
+      <h2>Your choices</h2>
+      <p>You can use the free check without creating an account at all. If you have an account and want it and its data removed, contact us and we'll delete it.</p>
+      <h2>Contact</h2>
+      <p>Questions about this policy can be sent to the contact address listed on our sign-up page.</p>
+    </div>
+  </div>
+</body>
+</html>

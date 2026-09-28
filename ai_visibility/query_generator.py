@@ -20,7 +20,6 @@ TEMPLATES = [
     "Affordable {category} in {location}?",
     "{category} in {location} open on weekends?",
     "Best {category} near me in {location} for {audience}?",
-    "Is {business} a good {category} in {location}?",
     "Compare the top {category} options in {location}.",
 ]
 
@@ -28,9 +27,15 @@ AUDIENCES = ["families", "walk-ins", "urgent appointments", "first-time customer
 
 
 def generate_queries(business: str, category: str, location: str, count: int = 8) -> list[str]:
+    # Template-based queries never mention `business` -- we're measuring
+    # whether the assistant names it *unprompted*, so a query that already
+    # says the business's name would inflate the score for a question no
+    # real customer would actually type.
     queries = []
     i = 0
-    while len(queries) < count:
+    max_template_rounds = len(TEMPLATES) * max(1, (count // len(TEMPLATES) + 2))
+    rounds = 0
+    while len(queries) < count and rounds < max_template_rounds:
         template = TEMPLATES[i % len(TEMPLATES)]
         q = template.format(
             category=category,
@@ -41,9 +46,15 @@ def generate_queries(business: str, category: str, location: str, count: int = 8
         if q not in queries:
             queries.append(q)
         i += 1
+        rounds += 1
 
     queries.extend(_llm_extra_queries(business, category, location))
-    return queries[:count] if len(queries) < count else queries
+    # Always respect the caller's requested count -- previously this only
+    # truncated when there were *fewer* than `count` queries, so adding the
+    # optional Claude-generated extras (or simply having a Claude key set)
+    # would silently make num_queries un-enforced and answers slower/pricier
+    # than the user asked for.
+    return queries[:count]
 
 
 def _llm_extra_queries(business: str, category: str, location: str) -> list[str]:

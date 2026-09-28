@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Visibility report -- {{ report.business }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -12,14 +13,19 @@
 </head>
 <body>
   <div class="wrap" style="padding-top:24px;">
-    <a class="back" href="/">← Run another check</a>
+    <a class="back" href="{{ url_for('index') }}">← Run another check</a>
     <h1>{{ report.business }}</h1>
     <p class="sub">{{ category }} &middot; {{ location }}</p>
+
+    <div class="notice" style="background:var(--accent-glow); border-color:rgba(108,140,255,0.25); color:var(--accent);">
+      This report has its own link -- bookmark or share this page's URL and it'll still show these results
+      (valid for 24 hours). Refreshing won't re-run the check.
+    </div>
 
     {% if report.any_demo_data %}
     <div class="notice">
       Some or all of these answers are simulated demo data (providers with no API key
-      configured). Add keys in <code>.env</code> for live results — see README.md.
+      configured).{% if not is_production %} Add keys in <code>.env</code> for live results — see README.md.{% endif %}
     </div>
     {% endif %}
 
@@ -117,19 +123,24 @@
 
     <div class="card">
       <h3 style="margin-top:0;">Every question asked</h3>
-      {% for r in report.results %}
-      <div class="qa-item">
-        <div class="qa-head">
-          <span class="qa-q">{{ r.query }}</span>
-          <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }}</span>
-          <span class="pill {{ 'yes' if r.mentioned else 'no' }}">
-            {{ 'mentioned' if r.mentioned else 'not mentioned' }}{% if r.position %} (#{{ r.position }}){% endif %}
-          </span>
+      <p class="sub" style="margin-bottom:8px;">Grouped by question, so you can see how each assistant answered the same prompt.</p>
+      {% for group in report.results_by_query %}
+      <div style="padding:14px 0; border-bottom:1px solid var(--border-soft);">
+        <p class="qa-q" style="margin:0 0 10px;">{{ group.query }}</p>
+        {% for r in group.answers %}
+        <div class="qa-item" style="padding:8px 0; border-bottom:none;">
+          <div class="qa-head">
+            <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }}</span>
+            <span class="pill {{ 'yes' if r.mentioned else 'no' }}">
+              {{ 'mentioned' if r.mentioned else 'not mentioned' }}{% if r.position %} (#{{ r.position }}){% endif %}
+            </span>
+          </div>
+          <details>
+            <summary>show raw answer</summary>
+            <div class="raw">{{ r.raw_text }}</div>
+          </details>
         </div>
-        <details>
-          <summary>show raw answer</summary>
-          <div class="raw">{{ r.raw_text }}</div>
-        </details>
+        {% endfor %}
       </div>
       {% endfor %}
     </div>

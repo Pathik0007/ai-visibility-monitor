@@ -84,6 +84,11 @@ class CheckRun(db.Model):
                 mention_rate=data.get("mention_rate") or 0,
                 top_competitors=data.get("top_competitors", []),
             )
+        if "results_by_query" not in data:
+            grouped: dict = {}
+            for r in data.get("results", []):
+                grouped.setdefault(r["query"], []).append(r)
+            data["results_by_query"] = [{"query": q, "answers": answers} for q, answers in grouped.items()]
         return data
 
     @staticmethod

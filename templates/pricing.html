@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pricing -- AI Visibility Monitor</title>
+  <meta name="description" content="One plan: $29/month to monitor a business weekly across ChatGPT, Claude, Perplexity, Gemini and DeepSeek. The one-off check is always free.">
+  <meta property="og:title" content="Pricing -- AI Visibility Monitor">
+  <meta property="og:description" content="One plan: $29/month to monitor a business weekly across five AI assistants. The one-off check is always free.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('pricing', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="{{ url_for('pricing', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+    <div class="navlinks">
+      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <header class="hero">
+      <h1>Simple pricing</h1>
+      <p class="lead">Try it for free. Pay only once you want it monitored automatically.</p>
+    </header>
+
+    <div class="card pricing-card">
+      <h3 style="margin-top:0;">Free check</h3>
+      <div class="price">$0</div>
+      <p class="sub">Run a one-off visibility check any time -- no account needed.</p>
+    </div>
+
+    <div class="card glow pricing-card">
+      <h3 style="margin-top:0;">Monitored business</h3>
+      <div class="price">$29<span>/month</span></div>
+      <p class="sub" style="margin-bottom:18px;">Weekly automatic re-checks, history over time, and an email alert when your visibility changes.</p>
+      <a href="{{ url_for('auth.signup') }}"><button type="button">Get started</button></a>
+    </div>
+
+    <p class="center sub">Questions? See the <a href="{{ url_for('faq') }}">FAQ</a>.</p>
+  </div>
+</body>
+</html>

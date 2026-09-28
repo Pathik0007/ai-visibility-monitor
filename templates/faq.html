@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ -- AI Visibility Monitor</title>
+  <meta name="description" content="Answers to common questions about how AI Visibility Monitor checks whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your business.">
+  <meta property="og:title" content="FAQ -- AI Visibility Monitor">
+  <meta property="og:description" content="Common questions about how AI Visibility Monitor works.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('faq', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="{{ url_for('faq', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {% for q in faqs %}
+      {
+        "@type": "Question",
+        "name": {{ q.q|tojson }},
+        "acceptedAnswer": { "@type": "Answer", "text": {{ q.a|tojson }} }
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ]
+  }
+  </script>
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+    <div class="navlinks">
+      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <header class="hero">
+      <h1>Frequently asked questions</h1>
+    </header>
+    <div class="card">
+      {% for q in faqs %}
+      <div class="faq-item">
+        <h3>{{ q.q }}</h3>
+        <p>{{ q.a }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>

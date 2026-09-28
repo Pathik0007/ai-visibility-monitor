@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>About -- AI Visibility Monitor</title>
+  <meta name="description" content="Why AI Visibility Monitor exists: more customers ask AI assistants for recommendations instead of searching, and businesses need to know if they're being named.">
+  <meta property="og:title" content="About -- AI Visibility Monitor">
+  <meta property="og:description" content="Why AI Visibility Monitor exists and how it measures AI-assistant recommendations.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('about', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="{{ url_for('about', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+    <div class="navlinks">
+      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <header class="hero">
+      <h1>About AI Visibility Monitor</h1>
+    </header>
+    <div class="card prose">
+      <p>More customers are asking ChatGPT, Claude, Perplexity, Gemini and DeepSeek for a recommendation instead of scrolling a search engine or a maps app. That's a new kind of visibility that a business's usual SEO checklist doesn't directly measure.</p>
+      <p>AI Visibility Monitor asks each of those assistants the same realistic questions a real customer might ask -- "best dentist in Parramatta", "affordable plumber near me" -- and measures whether a given business gets named, how prominently, and which competitors come up instead.</p>
+      <p>From that, it builds a concrete action plan: general fixes that help across every assistant (a complete Google Business Profile, consistent listings, specific recent reviews), plus notes on how each individual assistant tends to source its answers, since a fix that helps with one doesn't always help with another.</p>
+      <p>The scoring is deliberately transparent about its own limits: an API failure is never counted as "not mentioned", and a prose-style answer isn't force-fit into a ranked position it doesn't have. See the <a href="{{ url_for('faq') }}">FAQ</a> for more detail on how it works.</p>
+    </div>
+  </div>
+</body>
+</html>

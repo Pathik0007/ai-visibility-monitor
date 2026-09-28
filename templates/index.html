@@ -3,16 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Visibility Monitor -- See If ChatGPT, Claude, Perplexity, Gemini & DeepSeek Recommend Your Business</title>
-  <meta name="description" content="Check whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your local business -- or a competitor -- when customers ask AI assistants for a recommendation. Free instant check, plus weekly monitoring and a tailored action plan.">
+  <title>AI Visibility Monitor -- Do AI Assistants Recommend You?</title>
+  <meta name="description" content="Check whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your business -- free instant check plus a tailored action plan.">
   <meta property="og:title" content="AI Visibility Monitor">
   <meta property="og:description" content="See whether the major AI assistants recommend your business when someone asks -- and get a tailored plan to fix it if they don't.">
   <meta property="og:type" content="website">
-  <link rel="canonical" href="{{ request.url_root }}">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('index', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AI Visibility Monitor">
+  <meta name="twitter:description" content="See whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your business.">
+  <meta name="twitter:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <link rel="canonical" href="{{ url_for('index', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "AI Visibility Monitor",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Any (web-based)",
+    "description": "Checks whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend a business, and provides a tailored action plan to improve AI visibility.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "Free one-off visibility check"
+    },
+    "url": {{ url_for('index', _external=True)|tojson }}
+  }
+  </script>
 </head>
 <body>
   <nav class="topnav">
@@ -45,15 +69,16 @@
       </div>
       <p class="hint" style="margin-top:14px;">
         Providers in "demo" mode have no API key set yet — they show clearly-labeled
-        simulated answers so you can try the whole flow now. See README.md to add real keys.
+        simulated answers so you can try the whole flow now.{% if not is_production %} See README.md to add real keys.{% endif %}
       </p>
     </div>
 
-    <form class="card glow" method="POST" action="/check">
+    <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Checking 5 assistants…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="business">Business name</label>
-      <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental" autocomplete="off">
+      <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental"
+             data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
       <p class="hint">Start typing to search — picking a result auto-fills the category and location.</p>
 
       <label for="category">Category</label>
@@ -96,14 +121,20 @@
           <div><p class="step-t">You get a tailored action plan</p><p class="step-d">Concrete steps specific to your business type and to whichever assistant is missing you.</p></div>
         </div>
       </div>
+      <p style="margin-top:18px;"><a href="{{ url_for('how_it_works') }}">Read the full how-it-works breakdown →</a></p>
     </section>
+
+    <footer style="margin-top:56px; padding-top:24px; border-top:1px solid var(--border-soft); display:flex; gap:18px; flex-wrap:wrap; font-size:0.85rem;">
+      <a href="{{ url_for('pricing') }}">Pricing</a>
+      <a href="{{ url_for('faq') }}">FAQ</a>
+      <a href="{{ url_for('about') }}">About</a>
+      <a href="{{ url_for('how_it_works') }}">How it works</a>
+      <a href="{{ url_for('privacy') }}">Privacy</a>
+      <a href="{{ url_for('terms') }}">Terms</a>
+    </footer>
   </div>
 
   <script src="/static/autocomplete.js" defer></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      attachPlaceAutocomplete("business", "category", "location");
-    });
-  </script>
+  <script src="/static/form-loading.js" defer></script>
 </body>
 </html>

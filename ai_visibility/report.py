@@ -4,7 +4,7 @@ business owner actually reads: one score, a breakdown, and a fix list.
 """
 
 from __future__ import annotations
-from collections import Counter
+from collections import Counter, OrderedDict
 from .solutions import build_action_plan
 
 FIX_LIBRARY = [
@@ -93,6 +93,14 @@ def build_report(business: str, category: str, competitors: list[str], results: 
         top_competitors=top_competitors,
     )
 
+    # Grouped by the actual question asked, so the report reads as "here's
+    # how each assistant answered this specific question" rather than one
+    # long flat list repeating the same handful of questions once per
+    # provider -- much easier to scan when there are 4-5 providers.
+    results_by_query: "OrderedDict[str, list[dict]]" = OrderedDict()
+    for r in results:
+        results_by_query.setdefault(r["query"], []).append(r)
+
     return {
         "business": business,
         "category": category,
@@ -105,6 +113,7 @@ def build_report(business: str, category: str, competitors: list[str], results: 
         "recommendations": recommendations,
         "action_plan": action_plan,
         "results": results,
+        "results_by_query": [{"query": q, "answers": answers} for q, answers in results_by_query.items()],
         "error_count": len(errored),
         "any_demo_data": any(r["is_demo"] for r in results),
     }

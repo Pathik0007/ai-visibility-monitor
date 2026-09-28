@@ -23,7 +23,7 @@ class DeepSeekProvider(BaseProvider):
                 "messages": [{"role": "user", "content": query}],
                 "max_tokens": 500,
             },
-            timeout=30,
+            timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()

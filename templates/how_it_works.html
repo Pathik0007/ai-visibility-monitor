@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works -- AI Visibility Monitor</title>
+  <meta name="description" content="How AI Visibility Monitor tests ChatGPT, Claude, Perplexity, Gemini and DeepSeek to measure and improve your business's AI visibility.">
+  <meta property="og:title" content="How it works -- AI Visibility Monitor">
+  <meta property="og:description" content="How the visibility check, scoring and action plan actually work.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('how_it_works', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="{{ url_for('how_it_works', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
+    <div class="navlinks">
+      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <header class="hero">
+      <h1>How it works</h1>
+    </header>
+    <section class="steps" style="margin-top:0;">
+      <div class="step">
+        <div class="step-n">1</div>
+        <div><p class="step-t">Realistic questions, not your business name</p><p class="step-d">We generate the kind of question a real customer would type -- "best {category} in {location}" -- and deliberately never mention your business by name, so the score reflects whether assistants recommend you unprompted.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-n">2</div>
+        <div><p class="step-t">Sent to five AI assistants in parallel</p><p class="step-d">ChatGPT, Claude, Perplexity, Gemini and DeepSeek each answer independently. Claude and Gemini are configured to use live web search where supported, closer to how a real user's question gets answered.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-n">3</div>
+        <div><p class="step-t">Answers are scored, not guessed</p><p class="step-d">Each answer is checked for whether your business is named (matching is case-insensitive, whole-word, and tolerant of curly quotes and "&" vs "and"), and, if it's in a numbered or bulleted list, where it ranks. A mention with no clear ranking is counted but never force-fit into a fake position.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-n">4</div>
+        <div><p class="step-t">A plan tailored to your category and your gaps</p><p class="step-d">The action plan combines category-specific playbooks (a dentist and a restaurant need different things) with notes on which specific assistant is under-performing for you and roughly why, based on how that assistant tends to source its answers.</p></div>
+      </div>
+    </section>
+    <p class="center sub" style="margin-top:32px;">
+      <a href="{{ url_for('index') }}">Run a free check</a> or see the <a href="{{ url_for('faq') }}">FAQ</a>.
+    </p>
+  </div>
+</body>
+</html>

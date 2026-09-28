@@ -3,6 +3,7 @@
 <head><meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow"><title>Dashboard -- AI Visibility Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
@@ -54,11 +55,12 @@
     {% endfor %}
 
     {% if current_user.is_subscribed %}
-    <form class="card" method="POST" action="{{ url_for('add_business') }}">
+    <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 style="margin-top:0;">Add a business to monitor</h3>
       <label for="name">Business name</label>
-      <input id="name" name="name" required maxlength="200" autocomplete="off">
+      <input id="name" name="name" required maxlength="200" autocomplete="off"
+             data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
       <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category and location too.</p>
       <label for="category">Category</label>
       <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist (auto-fills if you pick a search result above)">
@@ -71,10 +73,6 @@
     {% endif %}
   </div>
   <script src="/static/autocomplete.js" defer></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      attachPlaceAutocomplete("name", "category", "location");
-    });
-  </script>
+  <script src="/static/form-loading.js" defer></script>
 </body>
 </html>
