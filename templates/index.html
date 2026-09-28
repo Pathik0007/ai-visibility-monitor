@@ -86,7 +86,9 @@
       <p class="hint">Start typing to search — picking a result auto-fills the category (and location, if you skipped it above).</p>
 
       <label for="category">Category</label>
-      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, Italian restaurant, plumber">
+      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, seafood restaurant, plumber"
+             data-autocomplete-categories="1">
+      <p class="hint">Start typing to pick from the list, or write your own.</p>
 
       <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 10)</span></label>
       <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care"

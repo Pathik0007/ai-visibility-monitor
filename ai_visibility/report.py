@@ -72,10 +72,19 @@ def build_report(business: str, category: str, competitors: list[str], results: 
         if r["mentioned"]:
             e["mentioned"] += 1
 
+    # Counted once per answer and merged case-insensitively ("Joe's Fish Bar"
+    # and "joe's fish bar" in one answer used to count as two mentions).
     competitor_counts = Counter()
+    display_name: dict[str, str] = {}
     for r in scoreable:
-        competitor_counts.update(r["competitors_mentioned"])
-    top_competitors = competitor_counts.most_common(5)
+        keys = set()
+        for name in r["competitors_mentioned"]:
+            key = name.strip().lower()
+            if key and key != business.lower():
+                keys.add(key)
+                display_name.setdefault(key, name.strip())
+        competitor_counts.update(keys)
+    top_competitors = [(display_name[k], n) for k, n in competitor_counts.most_common(5)]
 
     recommendations = _build_recommendations(
         mention_rate=mention_rate,

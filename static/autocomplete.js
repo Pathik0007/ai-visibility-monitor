@@ -4,6 +4,8 @@
  * Two modes, both backed by /api/places:
  *   - single mode ("business name" fields): picking a suggestion replaces
  *     the whole field and can also fill in paired category/location fields.
+ *   - category mode ("category" field): suggestions from the built-in
+ *     category list (/api/categories).
  *   - multi mode ("competitors" field): the field holds a comma-separated
  *     list, so autocomplete only ever searches/replaces the segment
  *     currently being typed (after the last comma), leaving earlier entries
@@ -65,11 +67,21 @@
     return state;
   }
 
-  function placesUrl(query, bias) {
+  // Google groups every keystroke of one search plus the final pick into a
+  // single billing "session" -- one token per search, replaced after a pick.
+  function newSessionToken() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+    var s = "";
+    for (var i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16);
+    return s;
+  }
+
+  function placesUrl(query, bias, session) {
     var url = "/api/places?q=" + encodeURIComponent(query);
     if (bias && bias.lat != null && bias.lon != null) {
       url += "&lat=" + encodeURIComponent(bias.lat) + "&lon=" + encodeURIComponent(bias.lon);
     }
+    if (session) url += "&session=" + encodeURIComponent(session);
     return url;
   }
 
@@ -153,6 +165,13 @@
         li.addEventListener("mouseenter", function () { setActive(i); });
         list.appendChild(li);
       });
+      if (results.some(function (r) { return r.source === "google"; })) {
+        var attrib = document.createElement("li");
+        attrib.className = "ac-attrib";
+        attrib.setAttribute("role", "presentation");
+        attrib.textContent = "Powered by Google";
+        list.appendChild(attrib);
+      }
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
     }
@@ -201,11 +220,32 @@
     var locationInput = locationId ? document.getElementById(locationId) : null;
     var bias = getLocationBias(locationInput);
 
+    var session = newSessionToken();
+
     var widget = buildWidget(nameInput, function (result) {
       nameInput.value = result.name || nameInput.value;
       if (categoryInput && result.category) categoryInput.value = result.category;
-      if (locationInput && result.location) locationInput.value = result.location;
+      if (locationInput && result.location && !locationInput.value.trim()) locationInput.value = result.location;
+      if (result.place_id) {
+        // Exact suburb/city + category from Google for the picked place.
+        var pickedSession = session;
+        fetch("/api/place-details?id=" + encodeURIComponent(result.place_id) + "&session=" + encodeURIComponent(pickedSession))
+          .then(function (r) { return r.ok ? r.json() : {}; })
+          .then(function (d) {
+            if (!d) return;
+            if (categoryInput && d.category) categoryInput.value = d.category;
+            if (locationInput && d.location && !locationInput.dataset.userTyped) locationInput.value = d.location;
+          })
+          .catch(function () {});
+      }
+      session = newSessionToken();
     });
+
+    if (locationInput) {
+      locationInput.addEventListener("input", function () {
+        locationInput.dataset.userTyped = locationInput.value.trim() ? "1" : "";
+      });
+    }
 
     // Guards against a slow earlier response landing after a faster later
     // one and overwriting it with stale results -- only the most recently
@@ -213,7 +253,7 @@
     var requestSeq = 0;
     var runSearch = debounce(function (query) {
       var seq = ++requestSeq;
-      fetch(placesUrl(query, bias))
+      fetch(placesUrl(query, bias, session))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
         .then(function (data) {
           if (seq !== requestSeq) return; // a newer search has since started
@@ -244,7 +284,10 @@
       return parts[parts.length - 1].trim();
     }
 
+    var session = newSessionToken();
+
     var widget = buildWidget(input, function (result) {
+      session = newSessionToken();
       var parts = input.value.split(",");
       parts[parts.length - 1] = " " + (result.name || currentSegment());
       input.value = parts.join(",").replace(/^,\s*/, "").trim() + ", ";
@@ -254,7 +297,7 @@
     var requestSeq = 0;
     var runSearch = debounce(function (query) {
       var seq = ++requestSeq;
-      fetch(placesUrl(query, bias))
+      fetch(placesUrl(query, bias, session))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
         .then(function (data) {
           if (seq !== requestSeq) return; // a newer search has since started
@@ -270,7 +313,34 @@
     });
   }
 
+  // Category field: suggestions from the built-in category list
+  // (/api/categories). Free text is still accepted -- the list only helps.
+  function attachCategoryAutocomplete(inputId) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+    var widget = buildWidget(input, function (result) { input.value = result.name; });
+    var requestSeq = 0;
+    var runSearch = debounce(function (query) {
+      var seq = ++requestSeq;
+      fetch("/api/categories?q=" + encodeURIComponent(query))
+        .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
+        .then(function (data) {
+          if (seq !== requestSeq) return;
+          var names = (data && data.results) || [];
+          if (!names.length) { widget.close(); return; } // any wording is fine here -- no "no matches" nag
+          widget.render(names.map(function (n) { return { name: n }; }), { searched: true });
+        })
+        .catch(function () {});
+    }, 150);
+    input.addEventListener("input", function () {
+      var q = input.value.trim();
+      if (q.length < 2) { requestSeq++; widget.close(); return; }
+      runSearch(q);
+    });
+  }
+
   window.attachPlaceAutocomplete = attachPlaceAutocomplete;
+  window.attachCategoryAutocomplete = attachCategoryAutocomplete;
   window.attachMultiValueAutocomplete = attachMultiValueAutocomplete;
 
   // Auto-init from data attributes instead of a per-page inline <script>
@@ -290,6 +360,9 @@
         input.getAttribute("data-autocomplete-category") || null,
         input.getAttribute("data-autocomplete-location") || null
       );
+    });
+    document.querySelectorAll("[data-autocomplete-categories]").forEach(function (input) {
+      attachCategoryAutocomplete(input.id);
     });
     document.querySelectorAll("[data-autocomplete-multi]").forEach(function (input) {
       attachMultiValueAutocomplete(input.id, input.getAttribute("data-autocomplete-location") || null);

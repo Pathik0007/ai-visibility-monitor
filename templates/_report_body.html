@@ -1,0 +1,141 @@
+{# Shared report body -- used by the free report page and the subscriber's
+   business page, so paid users see everything free users do (and more). #}
+{% set ins = report.insights %}
+
+{% if ins.all_demo %}
+<div class="notice notice-strong">
+  <strong>Sample report.</strong> Live AI checks aren't switched on for this site yet, so these answers are
+  simulated to show how the report works -- the score and names below aren't real results.{% if not is_production %}
+  Add API keys in <code>.env</code> for live results (see README.md).{% endif %}
+</div>
+{% elif report.any_demo_data %}
+<div class="notice">
+  Some assistants below are marked <strong>sample</strong> -- their answers are simulated, not real.
+</div>
+{% endif %}
+
+<div class="card glow">
+  <div class="score-hero">
+    {% if report.visibility_score is none %}
+    <div class="score-ring bad" style="--pct:0;"><span class="num">N/A</span></div>
+    {% else %}
+    <div class="score-ring {{ 'good' if report.visibility_score >= 70 else ('mid' if report.visibility_score >= 40 else 'bad') }}" style="--pct:{{ report.visibility_score }};">
+      <span class="num">{{ report.visibility_score }}<small>%</small></span>
+    </div>
+    {% endif %}
+    <div class="score-meta">
+      <p class="score-label">AI visibility{% if ins.all_demo %} <span class="badge demo">sample</span>{% endif %}</p>
+      <p class="score-headline">{{ ins.headline }}</p>
+    </div>
+  </div>
+  {% if ins.findings %}
+  <ul class="findings">
+    {% for f in ins.findings %}<li>{{ f }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+{% if ins.actions or ins.playbook %}
+<div class="card">
+  <h3 class="card-title">What to do next</h3>
+  {% if ins.actions %}
+  <ol class="actions">
+    {% for a in ins.actions %}
+    <li>
+      <div class="action-head"><strong>{{ a.title }}</strong>{% if a.why %}<span class="why">{{ a.why }}</span>{% endif %}</div>
+      <p>{{ a.detail }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  {% if ins.playbook %}
+  <details class="more"{% if not ins.actions %} open{% endif %}>
+    <summary>{% if ins.actions %}More steps for {{ ins.playbook_label }}{% else %}Steps for {{ ins.playbook_label }}{% endif %} ({{ ins.playbook|length }})</summary>
+    <ul class="fixlist">
+      {% for step in ins.playbook %}<li>{{ step }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="card-title">Question by question</h3>
+  <p class="sub small">&#10003; named you (with rank) &middot; &ndash; didn't &middot; ! failed. Tap a question to read the answers.</p>
+  <p class="swipe-hint">Swipe the table sideways to see every assistant &rarr;</p>
+  <div class="grid-scroll">
+    <table class="grid-table">
+      <thead>
+        <tr>
+          <th class="q-col">Question</th>
+          {% for p in ins.providers %}<th>{{ p }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in ins.rows %}
+        <tr>
+          <td class="q-col">{{ row.query }}</td>
+          {% for c in row.cells %}
+          <td class="cell cell-{{ c.state }}">
+            {% if c.state == 'hit' %}&#10003;{% if c.position %}<small>#{{ c.position }}</small>{% endif %}
+            {% elif c.state == 'error' %}!{% elif c.state == 'miss' %}&ndash;{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="q-col">Named you</td>
+          {% for e in ins.engines %}
+          <td class="cell total">{{ e.mentioned }}/{{ e.total }}{% if e.is_demo %}<small class="demo-tag">sample</small>{% endif %}</td>
+          {% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <h4 class="answers-title">Full answers</h4>
+  <div class="answers">
+    {% for row in ins.rows %}
+    <details class="qa">
+      <summary><span class="qa-q">{{ row.query }}</span><span class="qa-count">{{ row.hits }}/{{ row.ok }}</span></summary>
+      {% for r in row.answers %}
+      <div class="qa-answer">
+        <div class="qa-head">
+          <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }}{% if r.is_demo %} &middot; sample{% endif %}</span>
+          {% if r.error %}<span class="pill no">failed</span>
+          {% else %}<span class="pill {{ 'yes' if r.mentioned else 'no' }}">{{ 'named you' if r.mentioned else 'not named' }}{% if r.position %} #{{ r.position }}{% endif %}</span>{% endif %}
+        </div>
+        <div class="raw">{{ r.raw_text }}</div>
+      </div>
+      {% endfor %}
+    </details>
+    {% endfor %}
+  </div>
+</div>
+
+{% if ins.competitors %}
+<div class="card">
+  <h3 class="card-title">Who else gets named</h3>
+  <table class="bars">
+    {% set max_count = [ins.competitors[0][1], ins.your_mentions]|max %}
+    <tr class="you">
+      <td>{{ report.business }} <span class="badge live">you</span></td>
+      <td class="bar-cell"><span class="bar" style="width:{{ (100 * ins.your_mentions / max_count)|round|int if max_count else 0 }}%"></span></td>
+      <td class="num-cell">{{ ins.your_mentions }}</td>
+    </tr>
+    {% for name, count in ins.competitors %}
+    <tr>
+      <td>{{ name }}</td>
+      <td class="bar-cell"><span class="bar other" style="width:{{ (100 * count / max_count)|round|int if max_count else 0 }}%"></span></td>
+      <td class="num-cell">{{ count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="sub small">Number of answers (out of {{ ins.total_ok }}) that named each business.</p>
+</div>
+{% endif %}
+
+<p class="fineprint">How each assistant picks what to mention isn't published and changes over time -- treat the
+  steps above as well-grounded patterns, not a guarantee.</p>

@@ -66,7 +66,9 @@
              data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
       <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category (and location, if you skipped it above).</p>
       <label for="category">Category</label>
-      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist (auto-fills if you pick a search result above)">
+      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, seafood restaurant, plumber"
+             data-autocomplete-categories="1">
+      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Auto-fills when you pick a business above -- or start typing to pick from the list.</p>
       <label for="competitors">Competitors (comma-separated, optional, up to 10)</label>
       <input id="competitors" name="competitors" maxlength="1000"
              data-autocomplete-multi="1" data-autocomplete-location="location">

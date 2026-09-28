@@ -22,56 +22,9 @@
     </form>
 
     {% if latest %}
-    <div class="card glow" style="margin-top:20px;">
-      <div class="score-hero">
-        {% if latest.visibility_score is none %}
-        <div class="score-ring bad" style="--pct:0;"><span class="num">N/A</span></div>
-        {% else %}
-        <div class="score-ring {{ 'good' if latest.visibility_score >= 70 else ('mid' if latest.visibility_score >= 40 else 'bad') }}" style="--pct:{{ latest.visibility_score }};">
-          <span class="num">{{ latest.visibility_score }}<small>%</small></span>
-        </div>
-        {% endif %}
-        <div class="score-meta">
-          <p class="score-label">Latest visibility score</p>
-          <p class="score-desc">
-            {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC
-            {% if previous and previous.visibility_score is not none %}
-              &middot; previous: {{ previous.visibility_score }}%
-            {% endif %}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0;">What to fix</h3>
-      <ul class="fixlist">
-        {% for rec in latest.report.recommendations %}
-        <li>{{ rec }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0;">Your action plan -- {{ latest.report.action_plan.category_label }}</h3>
-      <ul class="fixlist">
-        {% for step in latest.report.action_plan.quick_wins %}
-        <li>{{ step }}</li>
-        {% endfor %}
-      </ul>
-      {% if latest.report.action_plan.competitor_note %}
-      <p style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">{{ latest.report.action_plan.competitor_note }}</p>
-      {% endif %}
-      {% for n in latest.report.action_plan.engine_notes %}
-      <div style="padding:8px 0;">
-        <strong>{{ n.provider }}</strong>
-        {% if n.mention_rate is not none %}<span class="sub">({{ n.mention_rate }}%)</span>{% endif %}
-        {% if n.underperforming %}<span class="badge demo" style="margin-left:6px;">weakest for you</span>{% endif %}
-        <p class="sub" style="margin:4px 0 0;">{{ n.note }}</p>
-      </div>
-      {% endfor %}
-      <p class="sub" style="font-size:0.76rem; margin-top:14px; margin-bottom:0;">{{ latest.report.action_plan.disclaimer }}</p>
-    </div>
+    <p class="sub small" style="margin-top:16px;">Last checked {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC{% if previous and previous.visibility_score is not none and latest.visibility_score is not none %}
+      &middot; {% set diff = latest.visibility_score - previous.visibility_score %}<span style="color: {{ 'var(--good)' if diff > 0 else ('var(--bad)' if diff < 0 else 'var(--muted)') }};">{{ '+' if diff > 0 else '' }}{{ diff }} pts</span> since the previous check ({{ previous.visibility_score }}%){% endif %}</p>
+    {% include "_report_body.html" %}
     {% else %}
     <p class="sub">No checks run yet.</p>
     {% endif %}

@@ -117,10 +117,22 @@ leaving earlier entries in the list untouched.
   independent business may return zero suggestions even when everything is
   working correctly -- try a well-known chain first if you want to sanity-check
   the feature itself.
-- Set `GOOGLE_PLACES_API_KEY` in `.env` to use Google Places (and Google's
-  Geocoding API for the location bias) instead, for a much larger place
-  database; it automatically falls back to the free path if the Google
-  lookup ever fails.
+- **Google business listings (recommended for production)**: set
+  `GOOGLE_PLACES_API_KEY` and the Business-name and Competitors fields search
+  Google's own place database -- the same listings behind Google Maps and
+  Google Business Profile -- via **Places API (New)** (enable that API, not
+  the legacy "Places API", which new projects can't enable). Typing uses
+  Autocomplete (New); picking a result makes one Place Details (New) call
+  (Essentials fields only: address components + types) to fill the exact
+  suburb and category. Both share a session token so Google bills them as
+  one search session. Google results show "Powered by Google" and are never
+  cached (Google's terms). If Google fails or finds nothing, it falls back
+  to the free OSM search. Location biasing always uses free Photon
+  geocoding, so the key only needs Places API (New).
+- **Category suggestions**: the Category field suggests from ~330 built-in
+  business categories (`categories.py`, served by `/api/categories`) and is
+  auto-filled with Google's category when a Google result is picked. Free
+  text is still accepted.
 - Entirely optional -- if the lookup is slow, blocked, or down, the fields
   just behave like plain text inputs. Nothing about submitting the form
   depends on it.
@@ -332,6 +344,37 @@ related bugs alongside it):
   render in the order they were sent. Added a per-field request sequence
   number so only the most recently *fired* search is ever allowed to render;
   an older one that resolves late is silently dropped.
+
+**Fifth pass** (live-site feedback: missing businesses, generic report):
+
+- **Google business search** -- Business name + Competitors now search
+  Google's listings via Places API (New) when `GOOGLE_PLACES_API_KEY` is
+  set (see above). The previous Google code used the legacy endpoint, which
+  new Google Cloud projects can't enable -- a new key would have silently
+  never worked.
+- **Category field suggestions** -- built-in category list plus Google's
+  category autofill.
+- **Questions read naturally** -- "I need a fast food in Sydney" is now "I
+  need a fast food restaurant in Sydney"; cuisines are capitalised; the
+  "for {audience}" question uses audiences that fit the business type (no
+  more "seafood restaurant for urgent appointments").
+- **Demo mode no longer fakes 100%** -- with no competitors typed in, every
+  simulated answer named the business at #1. Demo answers now include
+  clearly-labelled "Sample Rival" placeholders and the whole report is
+  marked as a sample.
+- **Report rebuilt around this check's actual data** -- headline + findings
+  with real counts (best/never-named assistants, top competitor vs you,
+  questions nobody named you for, average rank), a prioritised "What to do
+  next" where each step cites what triggered it, a question x assistant
+  grid, and a "who else gets named" comparison including you. The generic
+  per-assistant essays and duplicate "General fixes" list are gone.
+- **Subscribers see the full report too** -- the paid business page used to
+  show only the fix lists; it now renders the same report as the free check,
+  plus score change since the previous check.
+- Competitor counts merged case-insensitively and counted once per answer;
+  OSM suburbs/streets filtered out of business suggestions; "Copy link"
+  button on reports; places autocomplete rate limit raised (normal typing
+  across two fields could hit the old 30/min).
 
 ## Going live -- checklist
 

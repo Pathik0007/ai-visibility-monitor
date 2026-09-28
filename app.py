@@ -33,7 +33,9 @@ from billing import billing_bp
 from alerts import check_business_and_alert, run_weekly_checks
 from ai_visibility.pipeline import run_visibility_check
 from ai_visibility.providers import ALL_PROVIDERS
-from places import search_places, geocode_location
+from ai_visibility.insights import ensure_insights
+from places import search_places, geocode_location, place_details, valid_session_token
+from categories import search_categories
 import report_cache
 
 IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
@@ -298,7 +300,7 @@ def sitemap_xml():
 
 
 @app.route("/api/places")
-@limiter.limit("30 per minute")
+@limiter.limit("90 per minute")  # debounced as-you-type across two fields; 30 was hit by normal typing
 def api_places():
     """Business-name autocomplete, called as-you-type from the form. Always
     returns 200 with a (possibly empty) list -- never a hard error -- so a
@@ -312,11 +314,32 @@ def api_places():
     query = request.args.get("q", "")
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
+    session = valid_session_token(request.args.get("session"))
     try:
-        results = search_places(query, lat=lat, lon=lon)
+        results = search_places(query, lat=lat, lon=lon, session=session)
     except Exception:
         results = []
     return {"results": results}
+
+
+@app.route("/api/place-details")
+@limiter.limit("30 per minute")
+def api_place_details():
+    """Called once when a Google suggestion is picked, to autofill the exact
+    suburb/city and category. Always 200; {} when unavailable."""
+    session = valid_session_token(request.args.get("session"))
+    try:
+        details = place_details(request.args.get("id", ""), session=session)
+    except Exception:
+        details = None
+    return details or {}
+
+
+@app.route("/api/categories")
+@limiter.limit("60 per minute")
+def api_categories():
+    """Category-field suggestions from the built-in list (see categories.py)."""
+    return {"results": search_categories(request.args.get("q", ""))}
 
 
 @app.route("/api/geocode")
@@ -362,8 +385,9 @@ def check_report(report_id):
     if data is None:
         flash("That report has expired or couldn't be found -- run a new check below.")
         return redirect(url_for("index"))
+    report = ensure_insights(data["report"], location=data["location"] or "")
     return render_template(
-        "report.html", report=data["report"], location=data["location"], category=data["category"],
+        "report.html", report=report, location=data["location"], category=data["category"],
     )
 
 
@@ -411,7 +435,9 @@ def business_detail(business_id):
     history = list(reversed(business.runs))  # most recent first
     latest = history[0] if history else None
     previous = history[1] if len(history) > 1 else None
-    return render_template("business.html", business=business, history=history, latest=latest, previous=previous)
+    report = ensure_insights(latest.report, location=business.location) if latest else None
+    return render_template("business.html", business=business, history=history, latest=latest,
+                           previous=previous, report=report)
 
 
 @app.route("/businesses/<int:business_id>/run", methods=["POST"])

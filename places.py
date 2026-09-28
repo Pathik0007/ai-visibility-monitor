@@ -2,8 +2,16 @@
 Business-name autocomplete for the "Business name" field.
 
 Same demo-mode philosophy as ai_visibility/providers/: works out of the box
-with zero setup, and upgrades automatically to Google Places if
-GOOGLE_PLACES_API_KEY is set in .env.
+with zero setup, and upgrades automatically to Google's own business
+database (the same listings behind Google Maps / Google Business Profile)
+when GOOGLE_PLACES_API_KEY is set.
+
+Google path uses **Places API (New)** -- Autocomplete (New) while typing,
+then one Place Details (New) call when a suggestion is picked, both tied
+together by a session token so Google bills them as one search session
+rather than per keystroke. The legacy Places Autocomplete endpoint this
+used before can't be enabled on new Google Cloud projects, so a freshly
+created key would have silently fallen back to the free path forever.
 
 The free default is Photon (photon.komoot.io), an OpenStreetMap-based
 search API that's actually built for search-as-you-type use. An earlier
@@ -33,6 +41,7 @@ raising, so the manual text fields underneath always keep working.
 
 from __future__ import annotations
 import os
+import re
 import time
 import logging
 import requests
@@ -79,8 +88,26 @@ def _humanize(type_str: str) -> str:
     return type_str.replace("_", " ").strip().lower()
 
 
+# OSM tag values -> the wording people (and Google) actually use, so an
+# autofilled category reads naturally in questions ("fast_food" alone gave
+# "I need a fast food in Sydney").
+_OSM_VALUE_NAMES = {
+    "fast_food": "fast food restaurant", "doctors": "medical centre", "hairdresser": "hair salon",
+    "car_repair": "car repair shop", "beauty": "beauty salon", "clothes": "clothing store",
+    "butcher": "butcher shop", "optician": "optometrist", "veterinary": "veterinarian",
+    "fitness_centre": "gym", "kindergarten": "preschool", "childcare": "child care centre",
+    "ice_cream": "ice cream shop", "alcohol": "bottle shop", "hardware": "hardware store",
+    "shoes": "shoe store", "books": "bookstore", "jewelry": "jewelry store", "furniture": "furniture store",
+    "electronics": "electronics store", "mobile_phone": "cell phone store", "pet": "pet shop",
+    "car": "car dealer", "bicycle": "bicycle shop", "massage": "massage therapist",
+    "physiotherapist": "physiotherapist", "clinic": "medical centre", "nightclub": "night club",
+}
+
+
 def _map_osm_props_category(props: dict) -> str:
     osm_value = props.get("osm_value", "")
+    if osm_value in _OSM_VALUE_NAMES:
+        return _OSM_VALUE_NAMES[osm_value]
     if osm_value and osm_value not in _GENERIC_TYPES:
         return _humanize(osm_value)
     osm_key = props.get("osm_key", "")
@@ -106,8 +133,14 @@ def _format_photon_address(props: dict) -> str:
     return ", ".join(parts)
 
 
+# OSM feature kinds that are areas/roads rather than businesses -- a
+# business-name search returning "North Ryde" (the suburb) or "Waterloo
+# Road" isn't a useful suggestion.
+_PHOTON_NON_BUSINESS_KEYS = {"place", "highway", "boundary", "landuse", "natural", "waterway", "railway"}
+
+
 def _search_photon(query: str, limit: int, lat: float | None = None, lon: float | None = None) -> list[dict]:
-    params = {"q": query, "limit": limit, "lang": "en"}
+    params = {"q": query, "limit": limit + 3, "lang": "en"}  # over-fetch: some get filtered below
     if lat is not None and lon is not None:
         # Biases (doesn't strictly filter) results toward this point -- without
         # it, Photon ranks purely on text-match fuzziness with no geography at
@@ -129,12 +162,17 @@ def _search_photon(query: str, limit: int, lat: float | None = None, lon: float 
         name = props.get("name")
         if not name:
             continue  # a bare street/postcode match with no place name isn't a useful suggestion here
+        if props.get("osm_key") in _PHOTON_NON_BUSINESS_KEYS:
+            continue
         results.append({
             "name": name,
             "category": _map_osm_props_category(props),
             "location": _format_photon_location(props),
             "full_address": _format_photon_address(props),
+            "source": "osm",
         })
+        if len(results) >= limit:
+            break
     return results
 
 
@@ -156,25 +194,16 @@ def _geocode_photon(location_text: str) -> dict | None:
     return {"lat": lat, "lon": lon}
 
 
-def _geocode_google(location_text: str, api_key: str) -> dict | None:
-    resp = requests.get(
-        "https://maps.googleapis.com/maps/api/geocode/json",
-        params={"address": location_text, "key": api_key},
-        timeout=REQUEST_TIMEOUT,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("status") != "OK" or not data.get("results"):
-        return None
-    loc = data["results"][0]["geometry"]["location"]
-    return {"lat": loc["lat"], "lon": loc["lng"]}
-
-
 def geocode_location(location_text: str) -> dict | None:
     """Best-effort: turn free-text like "Parramatta, Sydney" into a
     lat/lon so the business-name search below can be biased toward it.
     Never raises -- a failure here should just mean an unbiased (global)
-    name search, not a broken page."""
+    name search, not a broken page.
+
+    Always Photon: it geocodes suburbs/cities well, it's free, and it means a
+    Google key only needs "Places API (New)" enabled -- not the separate
+    Geocoding API as well (a key without it used to fail every geocode
+    first, adding a wasted round-trip to every keystroke in Location)."""
     location_text = (location_text or "").strip()
     if len(location_text) < 3 or len(location_text) > MAX_QUERY_LEN:
         return None
@@ -184,80 +213,194 @@ def geocode_location(location_text: str) -> dict | None:
     if cached is not None:
         return cached or None  # cached `{}` means "looked up, found nothing"
 
-    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
-    result = None
-    succeeded = False
-    if api_key:
-        try:
-            result = _geocode_google(location_text, api_key)
-            succeeded = True
-        except Exception as exc:
-            logger.warning("Google geocoding failed, falling back: %s", exc)
-    if not succeeded:
-        try:
-            result = _geocode_photon(location_text)
-            succeeded = True
-        except Exception as exc:
-            logger.warning("Photon geocoding failed: %s", exc)
+    try:
+        result = _geocode_photon(location_text)
+    except Exception as exc:
+        logger.warning("Photon geocoding failed: %s", exc)
+        return None  # never cache a failure -- retry on the next keystroke
 
-    # Only cache a lookup that actually completed -- including a genuine
-    # "nothing there" answer from a successful call. Caching a *failure*
-    # (timeout, rate limit, transient network blip) as if it were a real
-    # empty result would silently suppress every retry for the next 5
-    # minutes, even once the provider recovers.
-    if succeeded:
-        _cache_set(cache_key, result or {})
+    # A genuine "nothing there" answer is cached (as {}) like a hit.
+    _cache_set(cache_key, result or {})
     return result
 
 
-def _map_google_types(types: list[str]) -> str:
+# ---------- Google Places API (New) ----------
+
+_GOOGLE_AUTOCOMPLETE_URL = "https://places.googleapis.com/v1/places:autocomplete"
+_GOOGLE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
+# Only "Essentials"-tier fields -- the cheapest Place Details SKU. The name
+# already comes from the autocomplete suggestion, so displayName (a "Pro"
+# field) isn't needed.
+_GOOGLE_DETAILS_FIELDS = "addressComponents,types,shortFormattedAddress"
+
+_GOOGLE_GENERIC_TYPES = _GENERIC_TYPES | {"food", "store", "health", "finance", "general_contractor"}
+_GOOGLE_ADDRESS_ONLY_TYPES = {"street_address", "route", "premise", "subpremise", "postal_code",
+                               "locality", "sublocality", "political", "geocode", "neighborhood",
+                               "administrative_area_level_1", "administrative_area_level_2", "country"}
+
+_SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_PLACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,400}$")
+
+
+def valid_session_token(token) -> str | None:
+    return token if isinstance(token, str) and _SESSION_RE.match(token) else None
+
+
+def _google_category(types: list[str]) -> str:
+    """Google lists types most-specific first ("seafood_restaurant",
+    "restaurant", "food", "point_of_interest", ...) -- take the first one
+    that actually says what the business is."""
     for t in types or []:
-        if t not in _GENERIC_TYPES:
+        if t not in _GOOGLE_GENERIC_TYPES and t not in _GOOGLE_ADDRESS_ONLY_TYPES:
+            return _humanize(t)
+    for t in types or []:
+        if t in ("food", "store", "health"):
             return _humanize(t)
     return ""
 
 
-def _search_google(query: str, api_key: str, limit: int, lat: float | None = None, lon: float | None = None) -> list[dict]:
-    params = {"input": query, "key": api_key, "types": "establishment"}
+def _location_from_secondary(secondary: str) -> str:
+    """Best guess at suburb/city from Google's secondary text, used until
+    Place Details fills in the exact value. "Waterloo Rd, North Ryde NSW,
+    Australia" -> "North Ryde NSW"; "Main St, Springfield, IL, USA" ->
+    "Springfield, IL"."""
+    parts = [p.strip() for p in (secondary or "").split(",") if p.strip()]
+    if len(parts) < 2:
+        return parts[0] if parts else ""
+    parts = parts[:-1]  # drop the country
+    last = parts[-1]
+    if len(last) <= 3 and last.isupper() and len(parts) >= 2:
+        return f"{parts[-2]}, {last}"
+    return last
+
+
+def _google_error(resp) -> str:
+    try:
+        err = resp.json().get("error", {})
+        return f"HTTP {resp.status_code} {err.get('status', '')}: {err.get('message', '')}".strip()
+    except Exception:
+        return f"HTTP {resp.status_code}"
+
+
+def _search_google(query: str, api_key: str, limit: int, lat: float | None = None,
+                   lon: float | None = None, session: str | None = None) -> list[dict]:
+    body: dict = {"input": query}
     if lat is not None and lon is not None:
-        # "Bias", not "restrict": a strict location+radius filter would hide
-        # a real result just outside an arbitrary radius; this only pushes
-        # nearby matches higher, the same intent as Photon's lat/lon above.
-        params["location"] = f"{lat},{lon}"
-        params["radius"] = 50000
-    resp = requests.get(
-        "https://maps.googleapis.com/maps/api/place/autocomplete/json",
-        params=params,
+        # "Bias", not "restrict": a strict filter would hide a real result just
+        # outside an arbitrary radius; this only pushes nearby matches higher.
+        body["locationBias"] = {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 50000.0}}
+    if session:
+        body["sessionToken"] = session
+    resp = requests.post(
+        _GOOGLE_AUTOCOMPLETE_URL,
+        json=body,
+        headers={"X-Goog-Api-Key": api_key, "Content-Type": "application/json"},
         timeout=REQUEST_TIMEOUT,
     )
-    resp.raise_for_status()
-    data = resp.json()
-    status = data.get("status")
-    if status not in ("OK", "ZERO_RESULTS"):
-        raise RuntimeError(f"Google Places autocomplete error: {status}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"Google Places autocomplete failed: {_google_error(resp)}")
     results = []
-    for pred in data.get("predictions", [])[:limit]:
-        structured = pred.get("structured_formatting", {})
+    for suggestion in resp.json().get("suggestions", []):
+        pred = suggestion.get("placePrediction")
+        if not pred:
+            continue
+        types = pred.get("types") or []
+        # Skip bare addresses/suburbs -- this field is for businesses.
+        if types and not ({"establishment", "point_of_interest"} & set(types)):
+            continue
+        structured = pred.get("structuredFormat") or {}
+        name = ((structured.get("mainText") or {}).get("text")) or ((pred.get("text") or {}).get("text")) or ""
+        secondary = (structured.get("secondaryText") or {}).get("text", "")
+        if not name:
+            continue
         results.append({
-            "name": structured.get("main_text") or pred.get("description", ""),
-            "category": _map_google_types(pred.get("types") or []),
-            "location": structured.get("secondary_text", ""),
-            "full_address": pred.get("description", ""),
+            "name": name,
+            "category": _google_category(types),
+            "location": _location_from_secondary(secondary),
+            "full_address": secondary or (pred.get("text") or {}).get("text", ""),
+            "place_id": pred.get("placeId"),
+            "source": "google",
         })
+        if len(results) >= limit:
+            break
     return results
 
 
+def place_details(place_id: str, session: str | None = None) -> dict | None:
+    """Called once when someone picks a Google suggestion: exact suburb/city
+    and category for the autofill. Passing the same session token as the
+    autocomplete calls closes the billing session. Never raises."""
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not api_key or not isinstance(place_id, str) or not _PLACE_ID_RE.match(place_id):
+        return None
+    params = {}
+    if session:
+        params["sessionToken"] = session
+    try:
+        resp = requests.get(
+            _GOOGLE_DETAILS_URL.format(place_id=place_id),
+            params=params,
+            headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": _GOOGLE_DETAILS_FIELDS},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            logger.warning("Google Place Details failed: %s", _google_error(resp))
+            return None
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Google Place Details failed: %s", exc)
+        return None
+
+    comps = data.get("addressComponents") or []
+
+    def find(*wanted, short=False):
+        for w in wanted:
+            for c in comps:
+                if w in (c.get("types") or []):
+                    return c.get("shortText" if short else "longText") or ""
+        return ""
+
+    area = find("locality", "postal_town", "sublocality", "administrative_area_level_2")
+    state = find("administrative_area_level_1", short=True)
+    location = ", ".join(p for p in (area, state) if p)
+    return {
+        "location": location,
+        "category": _google_category(data.get("types") or []),
+        "full_address": data.get("shortFormattedAddress", ""),
+    }
+
+
+def google_places_enabled() -> bool:
+    return bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
+
+
 def search_places(query: str, limit: int = DEFAULT_LIMIT,
-                   lat: float | None = None, lon: float | None = None) -> list[dict]:
+                   lat: float | None = None, lon: float | None = None,
+                   session: str | None = None) -> list[dict]:
     """Look up business-name suggestions. Never raises -- worst case is [].
 
     `lat`/`lon`, when given, bias results toward that point -- pass the
     geocoded coordinates of whatever the user has already typed into the
     Location field so "nene chicken" ranks the branch actually near them
-    above unrelated branches on the other side of the world."""
+    above unrelated branches on the other side of the world.
+
+    Google results are never cached here: Google's terms only allow caching
+    place IDs, and each keystroke is already covered by the session token.
+    Only the free OSM path uses the short in-memory cache."""
     query = (query or "").strip()
     if len(query) < 3 or len(query) > MAX_QUERY_LEN:
         return []
+
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if api_key:
+        try:
+            results = _search_google(query, api_key, limit, lat=lat, lon=lon, session=session)
+            if results:
+                return results
+            # Zero Google matches: fall through to OSM -- occasionally it has
+            # a small place Google doesn't, and it costs nothing to ask.
+        except Exception as exc:
+            logger.warning("Google Places autocomplete failed, falling back: %s", exc)
 
     bias_key = f"{round(lat, 2)},{round(lon, 2)}" if lat is not None and lon is not None else "nobias"
     cache_key = f"{query.lower()}|{limit}|{bias_key}"
@@ -265,30 +408,12 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT,
     if cached is not None:
         return cached
 
-    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
-    results: list[dict] = []
-    succeeded = False
+    try:
+        results = _search_photon(query, limit, lat=lat, lon=lon)
+    except Exception as exc:
+        logger.warning("Photon autocomplete failed: %s", exc)
+        return []  # a failed lookup is never cached -- retry on the next keystroke
 
-    if api_key:
-        try:
-            results = _search_google(query, api_key, limit, lat=lat, lon=lon)
-            succeeded = True
-        except Exception as exc:
-            logger.warning("Google Places autocomplete failed, falling back: %s", exc)
-            results = []
-
-    if not succeeded:
-        try:
-            results = _search_photon(query, limit, lat=lat, lon=lon)
-            succeeded = True
-        except Exception as exc:
-            logger.warning("Photon autocomplete failed: %s", exc)
-            results = []
-
-    # As above: only cache a completed lookup. A real zero-result answer
-    # (query succeeded, nothing matched -- e.g. a small business that just
-    # isn't in this provider's database) is worth caching; a failed request
-    # is not, or one Photon blip would hide results for 5 minutes afterward.
-    if succeeded:
-        _cache_set(cache_key, results)
+    # A completed lookup -- including a genuine zero-result answer -- is cached.
+    _cache_set(cache_key, results)
     return results
