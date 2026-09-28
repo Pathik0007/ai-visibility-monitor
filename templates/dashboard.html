@@ -3,13 +3,15 @@
 <head><meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow"><title>Dashboard -- AI Visibility Monitor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <div class="wrap">
-    <div style="display:flex; justify-content:space-between; align-items:baseline;">
-      <h1>Your businesses</h1>
-      <a class="back" href="{{ url_for('auth.logout') }}">log out</a>
-    </div>
+  <nav class="topnav">
+    <div class="brand"><span class="logo">◎</span> AI Visibility Monitor</div>
+    <div class="navlinks"><a class="btn-ghost" href="{{ url_for('auth.logout') }}">Log out</a></div>
+  </nav>
+  <div class="wrap" style="padding-top:24px;">
+    <h1>Your businesses</h1>
     <p class="sub">{{ current_user.email }} &middot;
       {% if current_user.is_subscribed %}
         <span style="color:var(--good);">subscribed{{ ' (demo)' if current_user.subscription_status == 'demo' else '' }}</span>

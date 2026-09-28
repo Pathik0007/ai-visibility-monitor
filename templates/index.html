@@ -3,83 +3,102 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Visibility Monitor -- See If ChatGPT & Perplexity Recommend Your Business</title>
-  <meta name="description" content="Check whether ChatGPT, Claude, Perplexity and Gemini recommend your local business -- or a competitor -- when customers ask AI assistants for a recommendation. Free instant check, weekly monitoring available.">
+  <title>AI Visibility Monitor -- See If ChatGPT, Claude, Perplexity, Gemini & DeepSeek Recommend Your Business</title>
+  <meta name="description" content="Check whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your local business -- or a competitor -- when customers ask AI assistants for a recommendation. Free instant check, plus weekly monitoring and a tailored action plan.">
   <meta property="og:title" content="AI Visibility Monitor">
-  <meta property="og:description" content="See whether ChatGPT, Claude, Perplexity and Gemini recommend your business when someone asks -- and what to fix if they don't.">
+  <meta property="og:description" content="See whether the major AI assistants recommend your business when someone asks -- and get a tailored plan to fix it if they don't.">
   <meta property="og:type" content="website">
   <link rel="canonical" href="{{ request.url_root }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="wrap">
-    <div style="display:flex; justify-content:flex-end; gap:14px; margin-bottom:8px;">
-      <a class="back" href="{{ url_for('auth.login') }}">log in</a>
-      <a class="back" href="{{ url_for('auth.signup') }}">sign up</a>
+  <nav class="topnav">
+    <div class="brand"><span class="logo">◎</span> AI Visibility Monitor</div>
+    <div class="navlinks">
+      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
     </div>
-    <h1>AI Visibility Monitor</h1>
-    <p class="sub">See whether ChatGPT, Claude, Perplexity and Gemini recommend your business -- or your competitor -- when someone asks.</p>
+  </nav>
+
+  <div class="wrap">
+    <header class="hero">
+      <span class="eyebrow">✦ Track your visibility across 5 AI assistants</span>
+      <h1>Do AI assistants recommend your business?</h1>
+      <p class="lead">More customers ask <strong>ChatGPT, Claude, Perplexity, Gemini and DeepSeek</strong> for recommendations instead of scrolling Google. Find out if they name you — or a competitor — and get a plan to fix it.</p>
+    </header>
 
     {% with messages = get_flashed_messages() %}
       {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
     {% endwith %}
 
     <div class="card">
-      {% for p in provider_status %}
-        <span class="badge {{ 'live' if p.configured else 'demo' }}">
-          {{ p.name }}: {{ 'live' if p.configured else 'demo mode' }}
-        </span>
-      {% endfor %}
-      <p style="color:var(--muted); font-size:0.82rem; margin-top:12px; margin-bottom:0;">
-        Providers in "demo mode" have no API key set in <code>.env</code> yet -- they'll
-        show clearly-labeled simulated answers so you can try the whole flow now.
-        See README.md to add real keys.
+      <div class="providers-row">
+        {% for p in provider_status %}
+          <span class="provider-chip {{ 'live' if p.configured else 'demo' }}">
+            <span class="dot"></span>{{ p.name }}
+            <span class="mode">{{ 'live' if p.configured else 'demo' }}</span>
+          </span>
+        {% endfor %}
+      </div>
+      <p class="hint" style="margin-top:14px;">
+        Providers in "demo" mode have no API key set yet — they show clearly-labeled
+        simulated answers so you can try the whole flow now. See README.md to add real keys.
       </p>
     </div>
 
-    <form class="card" method="POST" action="/check">
+    <form class="card glow" method="POST" action="/check">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="business">Business name</label>
       <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental" autocomplete="off">
-      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category and location too.</p>
+      <p class="hint">Start typing to search — picking a result auto-fills the category and location.</p>
 
       <label for="category">Category</label>
-      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist (auto-fills if you pick a search result above)">
+      <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, Italian restaurant, plumber">
 
       <label for="location">Location</label>
       <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
 
-      <label for="competitors">Competitors (comma-separated, optional, up to 10)</label>
+      <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 10)</span></label>
       <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care">
 
       <label for="num_queries">Number of questions to test</label>
       <select id="num_queries" name="num_queries">
-        <option value="4">4 (fast)</option>
-        <option value="6" selected>6</option>
-        <option value="10">10</option>
+        <option value="4">4 — fast</option>
+        <option value="6" selected>6 — balanced</option>
+        <option value="10">10 — thorough</option>
       </select>
 
-      <button type="submit">Run visibility check</button>
+      <button type="submit">Run visibility check →</button>
     </form>
-    <p class="sub" style="text-align:center;">
-      Want this checked automatically every week with an email alert?
-      <a class="back" href="{{ url_for('auth.signup') }}">Create an account</a>.
+
+    <p class="center sub">
+      Want this checked automatically every week with email alerts?
+      <a href="{{ url_for('auth.signup') }}">Create a free account</a>.
     </p>
 
-    <section style="margin-top:40px; color:var(--muted); font-size:0.88rem; line-height:1.6;">
-      <h2 style="color:var(--text); font-size:1.1rem;">Why AI visibility matters now</h2>
-      <p>
-        More customers are asking ChatGPT, Perplexity, Google's AI Overviews and
-        Gemini for recommendations instead of scrolling search results. If an AI
-        assistant doesn't know your business exists -- or recommends a competitor
-        instead -- you lose that customer before they ever see your website. This
-        tool runs realistic "best {category} near me" style questions against
-        each assistant, tells you exactly how often you're mentioned versus your
-        competitors, and what to fix if you're not.
-      </p>
+    <section class="section-info">
+      <h2>How it works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">1</div>
+          <div><p class="step-t">We ask the real questions your customers ask</p><p class="step-d">Realistic "best {category} in {location}" style prompts, sent to each AI assistant.</p></div>
+        </div>
+        <div class="step">
+          <div class="step-n">2</div>
+          <div><p class="step-t">We measure how often you show up</p><p class="step-d">A visibility score, a per-assistant breakdown, and which competitors get named instead.</p></div>
+        </div>
+        <div class="step">
+          <div class="step-n">3</div>
+          <div><p class="step-t">You get a tailored action plan</p><p class="step-d">Concrete steps specific to your business type and to whichever assistant is missing you.</p></div>
+        </div>
+      </div>
     </section>
   </div>
+
   <script src="/static/autocomplete.js" defer></script>
   <script>
     document.addEventListener("DOMContentLoaded", function () {

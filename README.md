@@ -42,6 +42,7 @@ are simulated (tagged "demo" in the UI):
 | ChatGPT    | `OPENAI_API_KEY`      | https://platform.openai.com/api-keys           |
 | Perplexity | `PERPLEXITY_API_KEY`  | https://www.perplexity.ai/settings/api         |
 | Gemini     | `GOOGLE_API_KEY`      | https://aistudio.google.com/apikey             |
+| DeepSeek   | `DEEPSEEK_API_KEY`    | https://platform.deepseek.com/api_keys         |
 
 Each is a paid, pay-as-you-go API (small cents-per-query cost) -- not the
 same login as the consumer chat apps.

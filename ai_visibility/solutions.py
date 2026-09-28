@@ -118,6 +118,9 @@ _ENGINE_MECHANISM_NOTES = {
     "Gemini": "Gemini is tightly integrated with Google's own index, Maps and Business Profile data. "
               "A complete, active Google Business Profile is probably the single highest-leverage thing "
               "for improving here specifically.",
+    "DeepSeek": "DeepSeek answers mostly from its training data rather than a live web search in a normal "
+                "chat, so like Claude it leans on being broadly present and cited across the web -- "
+                "directories, review sites and press -- rather than on very recent changes.",
 }
 
 _DISCLAIMER = ("Exactly how each assistant decides what to mention isn't published and changes over "

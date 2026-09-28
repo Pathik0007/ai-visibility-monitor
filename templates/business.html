@@ -3,10 +3,11 @@
 <head><meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow"><title>{{ business.name }} -- AI Visibility Monitor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <div class="wrap">
-    <a class="back" href="{{ url_for('dashboard') }}">&larr; dashboard</a>
+  <div class="wrap" style="padding-top:24px;">
+    <a class="back" href="{{ url_for('dashboard') }}">← Dashboard</a>
     <h1>{{ business.name }}</h1>
     <p class="sub">{{ business.category }} &middot; {{ business.location }}</p>
 
@@ -20,20 +21,25 @@
     </form>
 
     {% if latest %}
-    <div class="card" style="margin-top:20px;">
-      {% if latest.visibility_score is none %}
-      <div class="score bad">N/A</div>
-      {% else %}
-      <div class="score {{ 'good' if latest.visibility_score >= 70 else ('mid' if latest.visibility_score >= 40 else 'bad') }}">
-        {{ latest.visibility_score }}%
-      </div>
-      {% endif %}
-      <p class="sub" style="margin-top:0;">
-        Latest check -- {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC
-        {% if previous %}
-          (previous: {{ previous.visibility_score }}%, {{ latest.created_at.strftime('%d %b') }} vs {{ previous.created_at.strftime('%d %b') }})
+    <div class="card glow" style="margin-top:20px;">
+      <div class="score-hero">
+        {% if latest.visibility_score is none %}
+        <div class="score-ring bad" style="--pct:0;"><span class="num">N/A</span></div>
+        {% else %}
+        <div class="score-ring {{ 'good' if latest.visibility_score >= 70 else ('mid' if latest.visibility_score >= 40 else 'bad') }}" style="--pct:{{ latest.visibility_score }};">
+          <span class="num">{{ latest.visibility_score }}<small>%</small></span>
+        </div>
         {% endif %}
-      </p>
+        <div class="score-meta">
+          <p class="score-label">Latest visibility score</p>
+          <p class="score-desc">
+            {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC
+            {% if previous and previous.visibility_score is not none %}
+              &middot; previous: {{ previous.visibility_score }}%
+            {% endif %}
+          </p>
+        </div>
+      </div>
     </div>
 
     <div class="card">

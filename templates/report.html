@@ -5,46 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Visibility report -- {{ report.business }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="wrap">
-    <a class="back" href="/">&larr; run another check</a>
+  <div class="wrap" style="padding-top:24px;">
+    <a class="back" href="/">← Run another check</a>
     <h1>{{ report.business }}</h1>
     <p class="sub">{{ category }} &middot; {{ location }}</p>
 
     {% if report.any_demo_data %}
     <div class="notice">
       Some or all of these answers are simulated demo data (providers with no API key
-      configured). Add keys in <code>.env</code> for live results -- see README.md.
+      configured). Add keys in <code>.env</code> for live results — see README.md.
     </div>
     {% endif %}
 
-    <div class="card">
+    <div class="card glow">
       {% if report.visibility_score is none %}
-      <div class="score bad">N/A</div>
-      <p style="color:var(--muted); margin-top:0;">
-        Every check failed to get an answer (API errors) -- no score could be calculated. Try again shortly.
-      </p>
-      {% else %}
-      <div class="score {{ 'good' if report.visibility_score >= 70 else ('mid' if report.visibility_score >= 40 else 'bad') }}">
-        {{ report.visibility_score }}%
+      <div class="score-hero">
+        <div class="score-ring bad" style="--pct:0;"><span class="num">N/A</span></div>
+        <div class="score-meta">
+          <p class="score-label">No score available</p>
+          <p class="score-desc">Every check failed to get an answer (API errors) — try again shortly.</p>
+        </div>
       </div>
-      <p style="color:var(--muted); margin-top:0;">
-        Visibility score -- share of AI-assistant answers that mentioned {{ report.business }}{% if report.avg_position %} (average position when mentioned: #{{ "%.1f"|format(report.avg_position) }}){% endif %}{% if report.unranked_mention_count %} &middot; {{ report.unranked_mention_count }} mention(s) not in a clear ranked list{% endif %}.
-      </p>
+      {% else %}
+      <div class="score-hero">
+        <div class="score-ring {{ 'good' if report.visibility_score >= 70 else ('mid' if report.visibility_score >= 40 else 'bad') }}" style="--pct:{{ report.visibility_score }};">
+          <span class="num">{{ report.visibility_score }}<small>%</small></span>
+        </div>
+        <div class="score-meta">
+          <p class="score-label">Visibility score</p>
+          <p class="score-desc">
+            Share of AI-assistant answers that mentioned {{ report.business }}{% if report.avg_position %} — average position when mentioned: #{{ "%.1f"|format(report.avg_position) }}{% endif %}{% if report.unranked_mention_count %} &middot; {{ report.unranked_mention_count }} mention(s) not in a clear ranked list{% endif %}.
+          </p>
+        </div>
+      </div>
       {% endif %}
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0;">By engine</h3>
+      <h3 style="margin-top:0;">By assistant</h3>
       <table>
         <tr><th>Assistant</th><th>Mentioned</th><th>Mode</th></tr>
         {% for name, stats in report.by_engine.items() %}
         <tr>
           <td>{{ name }}</td>
           <td>{{ stats.mentioned }} / {{ stats.total }}{% if stats.errors %} <span style="color:var(--bad);">({{ stats.errors }} failed)</span>{% endif %}</td>
-          <td>{{ 'demo' if stats.is_demo else 'live' }}</td>
+          <td><span class="pill {{ 'no' if stats.is_demo else 'yes' }}">{{ 'demo' if stats.is_demo else 'live' }}</span></td>
         </tr>
         {% endfor %}
       </table>
@@ -62,8 +73,41 @@
     </div>
     {% endif %}
 
+    <div class="card glow">
+      <h3 style="margin-top:0;">Your action plan{% if report.action_plan %} — {{ report.action_plan.category_label }}{% endif %}</h3>
+      <p class="sub" style="margin-bottom:8px;">Concrete steps for this type of business, based on what actually moves the needle with AI assistants.</p>
+
+      {% if report.action_plan %}
+      <ul class="fixlist">
+        {% for step in report.action_plan.quick_wins %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ul>
+
+      {% if report.action_plan.competitor_note %}
+      <div class="callout">{{ report.action_plan.competitor_note }}</div>
+      {% endif %}
+
+      {% if report.action_plan.engine_notes %}
+      <h4>Why a specific assistant might be missing you</h4>
+      {% for n in report.action_plan.engine_notes %}
+      <div class="engine-note">
+        <div class="en-head">
+          <span class="en-name">{{ n.provider }}</span>
+          {% if n.mention_rate is not none %}<span class="en-rate">{{ n.mention_rate }}% of your checks</span>{% endif %}
+          {% if n.underperforming %}<span class="tag-weak">weakest for you</span>{% endif %}
+        </div>
+        <p class="en-body">{{ n.note }}</p>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <p class="fineprint">{{ report.action_plan.disclaimer }}</p>
+      {% endif %}
+    </div>
+
     <div class="card">
-      <h3 style="margin-top:0;">What to fix</h3>
+      <h3 style="margin-top:0;">General fixes</h3>
       <ul class="fixlist">
         {% for rec in report.recommendations %}
         <li>{{ rec }}</li>
@@ -72,40 +116,12 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0;">Your action plan -- {{ report.action_plan.category_label }}</h3>
-      <p class="sub" style="margin-bottom:14px;">Concrete steps for this type of business, based on what actually moves the needle with AI assistants.</p>
-      <ul class="fixlist">
-        {% for step in report.action_plan.quick_wins %}
-        <li>{{ step }}</li>
-        {% endfor %}
-      </ul>
-
-      {% if report.action_plan.competitor_note %}
-      <p style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">{{ report.action_plan.competitor_note }}</p>
-      {% endif %}
-
-      {% if report.action_plan.engine_notes %}
-      <h4 style="margin-bottom:8px;">Why a specific assistant might be missing you</h4>
-      {% for n in report.action_plan.engine_notes %}
-      <div style="padding:8px 0;">
-        <strong>{{ n.provider }}</strong>
-        {% if n.mention_rate is not none %}<span class="sub">({{ n.mention_rate }}% of your checks)</span>{% endif %}
-        {% if n.underperforming %}<span class="badge demo" style="margin-left:6px;">weakest for you</span>{% endif %}
-        <p class="sub" style="margin:4px 0 0;">{{ n.note }}</p>
-      </div>
-      {% endfor %}
-      {% endif %}
-
-      <p class="sub" style="font-size:0.76rem; margin-top:14px; margin-bottom:0;">{{ report.action_plan.disclaimer }}</p>
-    </div>
-
-    <div class="card">
       <h3 style="margin-top:0;">Every question asked</h3>
       {% for r in report.results %}
-      <div style="padding:10px 0; border-bottom:1px solid var(--border);">
-        <div>
-          <strong>{{ r.query }}</strong>
-          <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }} &middot; {{ 'demo' if r.is_demo else 'live' }}</span>
+      <div class="qa-item">
+        <div class="qa-head">
+          <span class="qa-q">{{ r.query }}</span>
+          <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }}</span>
           <span class="pill {{ 'yes' if r.mentioned else 'no' }}">
             {{ 'mentioned' if r.mentioned else 'not mentioned' }}{% if r.position %} (#{{ r.position }}){% endif %}
           </span>
@@ -117,6 +133,10 @@
       </div>
       {% endfor %}
     </div>
+
+    <p class="center" style="margin-top:24px;">
+      <a class="btn btn-sm" href="{{ url_for('auth.signup') }}">Monitor this weekly with email alerts →</a>
+    </p>
   </div>
 </body>
 </html>
