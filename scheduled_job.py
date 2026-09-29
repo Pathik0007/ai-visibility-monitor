@@ -13,8 +13,9 @@ separate, single-shot job avoids that entirely.
 Usage:
     python scheduled_job.py
 
-Set up to run weekly, e.g. a crontab entry:
-    0 3 * * 1  cd /path/to/app && /path/to/venv/bin/python scheduled_job.py
+Run it every 12 hours (it only re-checks businesses that are due: weekly on
+Starter, twice a week on Pro), e.g. a crontab entry:
+    0 3,15 * * *  cd /path/to/app && /path/to/venv/bin/python scheduled_job.py
 
 If you deploy with ENABLE_INPROCESS_SCHEDULER=1 (the default) and only ever
 run a single process, you don't need this at all -- it's the multi-worker

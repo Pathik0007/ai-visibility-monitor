@@ -10,9 +10,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <nav class="topnav">
-    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
-  </nav>
+  {% include "_nav.html" %}
   <div class="wrap">
     <h1>Privacy Policy</h1>
     <p class="sub">Last updated {{ updated_date }}.</p>

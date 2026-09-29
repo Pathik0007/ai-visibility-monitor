@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
+  {% include "_nav.html" %}
   <div class="wrap" style="padding-top:24px;">
     <a class="back" href="{{ url_for('dashboard') }}">← Dashboard</a>
     <h1>{{ business.name }}</h1>
@@ -16,10 +17,28 @@
       {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
     {% endwith %}
 
-    <form method="POST" action="{{ url_for('run_business_now', business_id=business.id) }}" data-loading-text="Checking 5 assistants…">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit">Run check now</button>
-    </form>
+    <div class="btn-row">
+      <form method="POST" action="{{ url_for('run_business_now', business_id=business.id) }}" data-loading-text="Checking 5 assistants (up to a minute)…">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Run check now</button>
+      </form>
+      {% if plan and plan.csv_export and history %}
+      <a class="btn-ghost" href="{{ url_for('export_business_csv', business_id=business.id) }}">Download CSV</a>
+      {% endif %}
+    </div>
+    {% if plan %}<p class="sub small" style="margin-top:10px;">{{ plan.cadence }} automatic checks on your {{ plan.name }} plan &middot; {{ plan.questions }} questions{% if business.custom_question_list() %} + {{ business.custom_question_list()|length }} of your own{% endif %} per check.</p>{% endif %}
+
+    {% if chart %}
+    <div class="card chart">
+      <h3 class="card-title">Score over time</h3>
+      <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" aria-label="Visibility score over time">
+        <line class="grid" x1="0" x2="{{ chart.w }}" y1="{{ chart.h / 2 }}" y2="{{ chart.h / 2 }}"></line>
+        <polyline class="line" points="{{ chart.points }}"></polyline>
+        {% for d in chart.dots %}<circle class="dot" cx="{{ d.x }}" cy="{{ d.y }}" r="4"><title>{{ d.date }}: {{ d.score }}%</title></circle>{% endfor %}
+      </svg>
+      <div class="chart-labels"><span>{{ chart.dots[0].date }} &middot; {{ chart.dots[0].score }}%</span><span>{{ chart.dots[-1].date }} &middot; {{ chart.dots[-1].score }}%</span></div>
+    </div>
+    {% endif %}
 
     {% if latest %}
     <p class="sub small" style="margin-top:16px;">Last checked {{ latest.created_at.strftime('%d %b %Y, %H:%M') }} UTC{% if previous and previous.visibility_score is not none and latest.visibility_score is not none %}
@@ -52,7 +71,35 @@
         {% endfor %}
       </table>
     </div>
+    <div class="card">
+      <details class="edit-box">
+        <summary>Edit competitors{% if plan and plan.custom_questions %}, your own questions{% endif %}, category or location</summary>
+        <form method="POST" action="{{ url_for('edit_business', business_id=business.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label for="location">Location</label>
+          <input id="location" name="location" required maxlength="200" value="{{ business.location }}">
+          <label for="category">Category</label>
+          <input id="category" name="category" required maxlength="200" value="{{ business.category }}" data-autocomplete-categories="1">
+          <label for="competitors">Competitors (comma-separated{% if plan %}, up to {{ plan.competitors }}{% endif %})</label>
+          <input id="competitors" name="competitors" maxlength="1000" value="{{ business.competitors }}"
+                 data-autocomplete-multi="1" data-autocomplete-location="location">
+          {% if plan and plan.custom_questions %}
+          <label for="custom_questions">Your own questions (one per line, up to {{ plan.custom_questions }})</label>
+          <textarea id="custom_questions" name="custom_questions" rows="4" maxlength="1100">{{ business.custom_questions or '' }}</textarea>
+          {% elif plan %}
+          <p class="field-hint">Want to test your own questions (e.g. “best gluten-free fish and chips in Ryde”)? That's on <a href="{{ url_for('billing.checkout', plan='pro') }}">Pro</a>.</p>
+          {% endif %}
+          <button type="submit">Save changes</button>
+        </form>
+      </details>
+    </div>
+
+    <form method="POST" action="{{ url_for('delete_business', business_id=business.id) }}" data-confirm="Stop monitoring {{ business.name }}? Its history will be deleted.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-danger btn-sm">Stop monitoring this business</button>
+    </form>
   </div>
+  <script src="/static/autocomplete.js" defer></script>
   <script src="/static/form-loading.js" defer></script>
 </body>
 </html>

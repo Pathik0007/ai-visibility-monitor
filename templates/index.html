@@ -39,13 +39,7 @@
   </script>
 </head>
 <body>
-  <nav class="topnav">
-    <div class="brand"><span class="logo">◎</span> AI Visibility Monitor</div>
-    <div class="navlinks">
-      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
-      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
-    </div>
-  </nav>
+  {% include "_nav.html" %}
 
   <div class="wrap">
     <header class="hero">
@@ -73,12 +67,12 @@
       </p>
     </div>
 
-    <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Checking 5 assistants…">
+    <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Asking 5 assistants — this takes up to a minute…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
-      <p class="hint">Fill this in first — it sharpens the business search below to your area.</p>
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW">
+      <p class="hint">Your suburb (e.g. North Ryde, NSW) — that's how customers ask, and it focuses the business search below on your area.</p>
 
       <label for="business">Business name</label>
       <input id="business" name="business" required maxlength="200" placeholder="e.g. Riverside Dental"
@@ -90,7 +84,7 @@
              data-autocomplete-categories="1">
       <p class="hint">Start typing to pick from the list, or write your own.</p>
 
-      <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 10)</span></label>
+      <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 5)</span></label>
       <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care"
              data-autocomplete-multi="1" data-autocomplete-location="location">
 
@@ -98,15 +92,19 @@
       <select id="num_queries" name="num_queries">
         <option value="4">4 — fast</option>
         <option value="6" selected>6 — balanced</option>
-        <option value="10">10 — thorough</option>
       </select>
+      <p class="hint">Subscribers get 10 questions per check, plus their own on Pro.</p>
 
       <button type="submit">Run visibility check →</button>
     </form>
 
     <p class="center sub">
+      {% if current_user.is_authenticated %}
+      Monitoring a business? <a href="{{ url_for('dashboard') }}">Go to your dashboard</a>.
+      {% else %}
       Want this checked automatically every week with email alerts?
       <a href="{{ url_for('auth.signup') }}">Create a free account</a>.
+      {% endif %}
     </p>
 
     <section class="section-info">

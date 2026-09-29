@@ -81,10 +81,15 @@ def check_business_and_alert(business: Business) -> CheckRun:
     """Runs the pipeline once for `business`, stores the result, and emails
     the owner if the change vs. the previous run is meaningful. Used by both
     the manual 'run check now' button and the weekly scheduled job."""
+    from plans import plan_for, PLANS
     previous = business.latest_run  # last run *before* this new one
+    plan = plan_for(business.owner) or PLANS["starter"]
 
     report = run_visibility_check(
-        business.name, business.category, business.location, business.competitor_list()
+        business.name, business.category, business.location, business.competitor_list(),
+        num_queries=plan["questions"],
+        extra_queries=business.custom_question_list()[: plan["custom_questions"]],
+        profile_benchmark=plan["profile_benchmark"],
     )
     run = CheckRun.from_report(business.id, report)
     db.session.add(run)
@@ -97,13 +102,28 @@ def check_business_and_alert(business: Business) -> CheckRun:
     return run
 
 
+def is_due(business, now=None) -> bool:
+    """Due once the plan's interval has passed since the last check (with a
+    few hours' slack so a job that runs a bit early doesn't skip a cycle)."""
+    from datetime import timedelta
+    from plans import plan_for
+    plan = plan_for(business.owner)
+    if not plan:
+        return False
+    last = business.latest_run
+    if last is None:
+        return True
+    now = now or datetime.utcnow()
+    return now - last.created_at >= timedelta(days=plan["check_every_days"]) - timedelta(hours=6)
+
+
 def run_weekly_checks(app) -> None:
-    """Scheduled entry point: re-check every business belonging to a
-    subscribed user. Wrapped in the Flask app context so it can use the DB
-    outside of a request."""
+    """Scheduled entry point (run it at least every 12 hours): re-checks
+    every subscribed business that's due under its plan -- weekly on
+    Starter, twice a week on Pro."""
     with app.app_context():
         for business in Business.query.all():
-            if business.owner.is_subscribed:
+            if is_due(business):
                 try:
                     check_business_and_alert(business)
                 except Exception as exc:

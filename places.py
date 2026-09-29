@@ -191,7 +191,16 @@ def _geocode_photon(location_text: str) -> dict | None:
     if not coords or len(coords) < 2:
         return None
     lon, lat = coords[0], coords[1]  # GeoJSON order is [lon, lat]
-    return {"lat": lat, "lon": lon}
+    props = features[0].get("properties") or {}
+    # Also where it is -- used to localise the AI assistants' own web
+    # searches (country/city) and to keep business suggestions in-country.
+    place_name = props.get("name") if props.get("osm_key") == "place" else None
+    return {
+        "lat": lat, "lon": lon,
+        "country": (props.get("countrycode") or "").upper() or None,
+        "city": place_name or props.get("city") or props.get("district") or None,
+        "region": props.get("state") or None,
+    }
 
 
 def geocode_location(location_text: str) -> dict | None:
@@ -246,13 +255,20 @@ def valid_session_token(token) -> str | None:
     return token if isinstance(token, str) and _SESSION_RE.match(token) else None
 
 
+_GOOGLE_TYPE_NAMES = {
+    "car_repair": "car repair shop", "hair_care": "hair salon", "meal_takeaway": "takeaway restaurant",
+    "meal_delivery": "food delivery", "lodging": "accommodation", "doctor": "medical centre",
+    "real_estate_agency": "real estate agency", "moving_company": "removalist",
+}
+
+
 def _google_category(types: list[str]) -> str:
     """Google lists types most-specific first ("seafood_restaurant",
     "restaurant", "food", "point_of_interest", ...) -- take the first one
     that actually says what the business is."""
     for t in types or []:
         if t not in _GOOGLE_GENERIC_TYPES and t not in _GOOGLE_ADDRESS_ONLY_TYPES:
-            return _humanize(t)
+            return _GOOGLE_TYPE_NAMES.get(t) or _humanize(t)
     for t in types or []:
         if t in ("food", "store", "health"):
             return _humanize(t)
@@ -283,8 +299,13 @@ def _google_error(resp) -> str:
 
 
 def _search_google(query: str, api_key: str, limit: int, lat: float | None = None,
-                   lon: float | None = None, session: str | None = None) -> list[dict]:
+                   lon: float | None = None, session: str | None = None,
+                   region: str | None = None) -> list[dict]:
     body: dict = {"input": query}
+    if region:
+        # Keep suggestions in the user's country -- without it a small local
+        # business competes with same-named places worldwide.
+        body["includedRegionCodes"] = [region.lower()]
     if lat is not None and lon is not None:
         # "Bias", not "restrict": a strict filter would hide a real result just
         # outside an arbitrary radius; this only pushes nearby matches higher.
@@ -298,7 +319,9 @@ def _search_google(query: str, api_key: str, limit: int, lat: float | None = Non
         timeout=REQUEST_TIMEOUT,
     )
     if resp.status_code != 200:
+        _record_google_error(f"Autocomplete: {_google_error(resp)}")
         raise RuntimeError(f"Google Places autocomplete failed: {_google_error(resp)}")
+    _record_google_error(None)
     results = []
     for suggestion in resp.json().get("suggestions", []):
         pred = suggestion.get("placePrediction")
@@ -344,6 +367,7 @@ def place_details(place_id: str, session: str | None = None) -> dict | None:
             timeout=REQUEST_TIMEOUT,
         )
         if resp.status_code != 200:
+            _record_google_error(f"Place Details: {_google_error(resp)}")
             logger.warning("Google Place Details failed: %s", _google_error(resp))
             return None
         data = resp.json()
@@ -374,9 +398,12 @@ def google_places_enabled() -> bool:
     return bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
 
 
+_REGION_RE = re.compile(r"^[A-Za-z]{2}$")
+
+
 def search_places(query: str, limit: int = DEFAULT_LIMIT,
                    lat: float | None = None, lon: float | None = None,
-                   session: str | None = None) -> list[dict]:
+                   session: str | None = None, region: str | None = None) -> list[dict]:
     """Look up business-name suggestions. Never raises -- worst case is [].
 
     `lat`/`lon`, when given, bias results toward that point -- pass the
@@ -394,7 +421,8 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT,
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     if api_key:
         try:
-            results = _search_google(query, api_key, limit, lat=lat, lon=lon, session=session)
+            region = region if region and _REGION_RE.match(region) else None
+            results = _search_google(query, api_key, limit, lat=lat, lon=lon, session=session, region=region)
             if results:
                 return results
             # Zero Google matches: fall through to OSM -- occasionally it has
@@ -417,3 +445,108 @@ def search_places(query: str, limit: int = DEFAULT_LIMIT,
     # A completed lookup -- including a genuine zero-result answer -- is cached.
     _cache_set(cache_key, results)
     return results
+
+
+# ---------- Google profile benchmark (Places API (New) Text Search) ----------
+#
+# Looks up the business and its most-named competitors on Google Maps and
+# compares the things assistants demonstrably lean on: rating, number of
+# reviews, primary category, whether a website is listed, weekend hours.
+# Uses Enterprise-tier fields (rating, reviews, hours, website), so it's
+# only run for subscriber checks (see pipeline `profile_benchmark=`).
+
+_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+_PROFILE_FIELDS = ",".join([
+    "places.id", "places.displayName", "places.rating", "places.userRatingCount",
+    "places.primaryTypeDisplayName", "places.websiteUri", "places.googleMapsUri",
+    "places.businessStatus", "places.regularOpeningHours.weekdayDescriptions",
+    "places.formattedAddress",
+])
+_SAMPLE_PREFIX = "sample rival"
+_last_google_error: dict = {"message": None, "at": None}
+
+
+def _record_google_error(message: str | None) -> None:
+    _last_google_error["message"] = message
+    _last_google_error["at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()) if message else None
+
+
+def google_status() -> dict:
+    """For /healthz: which business-search backend is active and the last
+    Google error, if any (e.g. "API not enabled", "billing not enabled")."""
+    return {
+        "business_search": "google" if google_places_enabled() else "openstreetmap (no GOOGLE_PLACES_API_KEY)",
+        "last_google_error": _last_google_error["message"],
+        "last_google_error_at": _last_google_error["at"],
+    }
+
+
+def _open_on(descriptions: list[str], day: str) -> bool | None:
+    for d in descriptions or []:
+        if d.lower().startswith(day):
+            return "closed" not in d.lower()
+    return None
+
+
+def _lookup_profile(name: str, location: str, context: dict | None, api_key: str) -> dict:
+    from ai_visibility.analyzer import names_match
+    body: dict = {"textQuery": f"{name} {location}".strip(), "pageSize": 3}
+    if context and context.get("lat") is not None and context.get("lon") is not None:
+        body["locationBias"] = {"circle": {"center": {"latitude": context["lat"], "longitude": context["lon"]},
+                                           "radius": 30000.0}}
+    if context and context.get("country"):
+        body["regionCode"] = context["country"]
+    resp = requests.post(
+        _TEXT_SEARCH_URL, json=body, timeout=8,
+        headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": _PROFILE_FIELDS, "Content-Type": "application/json"},
+    )
+    if resp.status_code != 200:
+        msg = _google_error(resp)
+        _record_google_error(f"Text Search: {msg}")
+        raise RuntimeError(msg)
+    for place in resp.json().get("places") or []:
+        google_name = (place.get("displayName") or {}).get("text", "")
+        if not names_match(google_name, name):
+            continue  # a different business -- don't compare against the wrong listing
+        hours = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
+        return {
+            "name": name, "found": True, "google_name": google_name,
+            "rating": place.get("rating"), "reviews": place.get("userRatingCount") or 0,
+            "category": (place.get("primaryTypeDisplayName") or {}).get("text", ""),
+            "website": bool(place.get("websiteUri")), "maps_url": place.get("googleMapsUri"),
+            "status": place.get("businessStatus"), "address": place.get("formattedAddress", ""),
+            "hours_listed": bool(hours),
+            "open_sat": _open_on(hours, "saturday"), "open_sun": _open_on(hours, "sunday"),
+        }
+    return {"name": name, "found": False}
+
+
+def profile_benchmark(business: str, location: str, top_competitors: list, competitors: list[str],
+                      context: dict | None = None, max_competitors: int = 4) -> dict:
+    from ai_visibility.analyzer import names_match
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not api_key:
+        return {"available": False, "reason": "no_key"}
+
+    names: list[str] = []
+    for n in [c for c, _ in top_competitors] + list(competitors):
+        if not n or n.lower().startswith(_SAMPLE_PREFIX) or names_match(n, business):
+            continue
+        if any(names_match(n, x) for x in names):
+            continue
+        names.append(n)
+        if len(names) >= max_competitors:
+            break
+
+    from concurrent.futures import ThreadPoolExecutor
+    def safe(n):
+        try:
+            return _lookup_profile(n, location, context, api_key)
+        except Exception as exc:
+            return {"name": n, "found": False, "error": str(exc)[:160]}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        profiles = list(ex.map(safe, [business] + names))
+    if all(p.get("error") for p in profiles):
+        return {"available": False, "reason": "error", "error": profiles[0]["error"]}
+    _record_google_error(None)
+    return {"available": True, "you": profiles[0], "competitors": profiles[1:]}

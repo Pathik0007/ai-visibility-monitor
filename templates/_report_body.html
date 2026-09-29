@@ -59,9 +59,86 @@
 </div>
 {% endif %}
 
+{% if ins.profiles %}
+<div class="card">
+  <h3 class="card-title">Your Google profile vs the competition</h3>
+  <p class="sub small">Live from Google Maps -- the data assistants lean on when choosing who to recommend.</p>
+  <div class="grid-scroll">
+    <table class="profile-table">
+      <thead><tr><th>Business</th><th>Rating</th><th>Reviews</th><th>Google category</th><th>Website</th><th>Weekends</th></tr></thead>
+      <tbody>
+        {% for p in [ins.profiles.you] + ins.profiles.competitors %}
+        <tr class="{{ 'you' if loop.first else '' }}">
+          <td>{% if p.maps_url %}<a href="{{ p.maps_url }}" target="_blank" rel="noopener">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}{% if loop.first %} <span class="badge live">you</span>{% endif %}</td>
+          {% if p.found %}
+          <td>{{ '%.1f'|format(p.rating) ~ '★' if p.rating else '–' }}</td>
+          <td>{{ '{:,}'.format(p.reviews or 0) }}</td>
+          <td>{{ p.category or '–' }}</td>
+          <td>{{ 'yes' if p.website else 'no' }}</td>
+          <td>{% if not p.hours_listed %}no hours{% elif p.open_sat or p.open_sun %}{{ 'Sat' if p.open_sat else '' }}{{ ' + ' if p.open_sat and p.open_sun else '' }}{{ 'Sun' if p.open_sun else '' }}{% else %}closed{% endif %}</td>
+          {% else %}
+          <td colspan="5" class="muted">Not found on Google Maps under this name</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% elif not ins.all_demo %}
+<div class="card upsell">
+  <strong>Pro:</strong> compare your Google rating, review count, category, website and weekend hours side by side
+  with the businesses assistants recommend instead. <a href="{{ url_for('pricing') }}">See plans →</a>
+</div>
+{% endif %}
+
+{% if ins.you_quotes or ins.competitor_quotes or ins.negatives %}
+<div class="card">
+  <h3 class="card-title">What the assistants say</h3>
+  {% if ins.negatives %}
+  <div class="quote-group bad">
+    <p class="quote-name">About you -- couldn't find you</p>
+    {% for q in ins.negatives %}<p class="quote"><span class="quote-src">{{ q.provider }}</span>“{{ q.text }}”</p>{% endfor %}
+  </div>
+  {% endif %}
+  {% if ins.you_quotes %}
+  <div class="quote-group">
+    <p class="quote-name">About you</p>
+    {% for q in ins.you_quotes %}<p class="quote"><span class="quote-src">{{ q.provider }}</span>“{{ q.text }}”</p>{% endfor %}
+  </div>
+  {% endif %}
+  {% for c in ins.competitor_quotes %}
+  <div class="quote-group">
+    <p class="quote-name">{{ c.name }} <span class="sub small">recommended in {{ c.count }} answer{{ 's' if c.count != 1 else '' }}</span></p>
+    {% for q in c.quotes %}<p class="quote"><span class="quote-src">{{ q.provider }}</span>“{{ q.text }}”</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <p class="sub small" style="margin:10px 0 0;">The words assistants use for a business come from its reviews and listings -- if a competitor is praised for something you also do well, say it in those words on your profile and site.</p>
+</div>
+{% endif %}
+
+{% if ins.sources %}
+<div class="card">
+  <h3 class="card-title">Where the assistants got their information</h3>
+  <p class="sub small">Pages the assistants read or cited while answering ({{ ins.answers_with_sources }} of {{ ins.total_ok }} answers used live web sources).</p>
+  <table class="bars">
+    {% set max_src = ins.sources[0].count %}
+    {% for d in ins.sources %}
+    <tr>
+      <td><a href="{{ d.url }}" target="_blank" rel="noopener nofollow">{{ d.domain }}</a></td>
+      <td class="bar-cell"><span class="bar other" style="width:{{ (100 * d.count / max_src)|round|int }}%"></span></td>
+      <td class="num-cell">{{ d.count }}</td>
+      <td class="src-missed">{% if d.missed %}{{ d.missed }} without you{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="sub small" style="margin-top:8px;">Being listed, reviewed or featured on these sites is the most direct way to show up in these answers.</p>
+</div>
+{% endif %}
+
 <div class="card">
   <h3 class="card-title">Question by question</h3>
-  <p class="sub small">&#10003; named you (with rank) &middot; &ndash; didn't &middot; ! failed. Tap a question to read the answers.</p>
+  <p class="sub small">&#10003; recommended you (with rank) &middot; &ndash; didn't &middot; ! failed. Tap a question to read the answers.</p>
   <p class="swipe-hint">Swipe the table sideways to see every assistant &rarr;</p>
   <div class="grid-scroll">
     <table class="grid-table">
@@ -86,7 +163,7 @@
       </tbody>
       <tfoot>
         <tr>
-          <td class="q-col">Named you</td>
+          <td class="q-col">Recommended you</td>
           {% for e in ins.engines %}
           <td class="cell total">{{ e.mentioned }}/{{ e.total }}{% if e.is_demo %}<small class="demo-tag">sample</small>{% endif %}</td>
           {% endfor %}
@@ -105,7 +182,7 @@
         <div class="qa-head">
           <span class="badge {{ 'demo' if r.is_demo else 'live' }}">{{ r.provider }}{% if r.is_demo %} &middot; sample{% endif %}</span>
           {% if r.error %}<span class="pill no">failed</span>
-          {% else %}<span class="pill {{ 'yes' if r.mentioned else 'no' }}">{{ 'named you' if r.mentioned else 'not named' }}{% if r.position %} #{{ r.position }}{% endif %}</span>{% endif %}
+          {% else %}<span class="pill {{ 'yes' if r.mentioned else 'no' }}">{{ 'recommended you' if r.mentioned else ("said it couldn't find you" if r.negative_mention else 'not recommended') }}{% if r.position %} #{{ r.position }}{% endif %}</span>{% endif %}
         </div>
         <div class="raw">{{ r.raw_text }}</div>
       </div>
@@ -117,7 +194,7 @@
 
 {% if ins.competitors %}
 <div class="card">
-  <h3 class="card-title">Who else gets named</h3>
+  <h3 class="card-title">Who else gets recommended</h3>
   <table class="bars">
     {% set max_count = [ins.competitors[0][1], ins.your_mentions]|max %}
     <tr class="you">
@@ -133,9 +210,9 @@
     </tr>
     {% endfor %}
   </table>
-  <p class="sub small">Number of answers (out of {{ ins.total_ok }}) that named each business.</p>
+  <p class="sub small">Number of answers (out of {{ ins.total_ok }}) that recommended each business.</p>
 </div>
 {% endif %}
 
-<p class="fineprint">How each assistant picks what to mention isn't published and changes over time -- treat the
+<p class="fineprint">{% if ins.live_search_engines %}{{ ins.live_search_engines|join(', ') }} searched the live web{% if report.location_context and report.location_context.city %} as a customer in {{ report.location_context.city }}{% endif %} for these answers{% if 'DeepSeek' in ins.providers and 'DeepSeek' not in ins.live_search_engines %}; DeepSeek answers from its training data{% endif %}. {% endif %}How each assistant picks what to mention isn't published and changes over time -- treat the
   steps above as well-grounded patterns, not a guarantee.</p>

@@ -8,8 +8,6 @@ top of the templates -- purely additive, never required.
 
 from __future__ import annotations
 import os
-from .providers.claude_provider import ClaudeProvider
-from .providers.base import NotConfiguredError
 
 import re
 
@@ -132,24 +130,7 @@ def generate_queries(business: str, category: str, location: str, count: int = 8
         i += 1
         rounds += 1
 
-    queries.extend(_llm_extra_queries(business, noun, location))
-    # Always respect the caller's requested count.
+    # (An optional Claude call used to add extra phrasings here, but the
+    # templates always fill `count` first, so its output was thrown away --
+    # a wasted paid API call on every check. Removed.)
     return queries[:count]
-
-
-def _llm_extra_queries(business: str, category: str, location: str) -> list[str]:
-    """Optional: use Claude to add 2-3 more natural questions, if configured."""
-    provider = ClaudeProvider()
-    if not provider.is_configured():
-        return []
-    prompt = (
-        f"List 3 short, realistic questions a real customer might type into "
-        f"ChatGPT or Perplexity while looking for a '{category}' in "
-        f"'{location}'. One per line, no numbering, no extra commentary."
-    )
-    try:
-        text = provider.ask(prompt)
-    except Exception:
-        return []
-    lines = [l.strip("-• \t") for l in text.splitlines() if l.strip()]
-    return lines[:3]

@@ -14,12 +14,25 @@ from models import db
 
 billing_bp = Blueprint("billing", __name__, url_prefix="/billing")
 
-PRICE_ID = os.environ.get("STRIPE_PRICE_ID")
 IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
 
+# One Stripe recurring price per plan (see plans.py).
+PRICE_ENV = {"starter": "STRIPE_PRICE_ID", "pro": "STRIPE_PRICE_ID_PRO"}
 
-def _stripe_configured() -> bool:
-    return bool(os.environ.get("STRIPE_SECRET_KEY")) and bool(PRICE_ID)
+
+def _price_id(plan: str) -> str | None:
+    return os.environ.get(PRICE_ENV.get(plan, "STRIPE_PRICE_ID"))
+
+
+def _plan_for_price(price_id: str | None) -> str | None:
+    for plan, env in PRICE_ENV.items():
+        if price_id and os.environ.get(env) == price_id:
+            return plan
+    return None
+
+
+def _stripe_configured(plan: str = "starter") -> bool:
+    return bool(os.environ.get("STRIPE_SECRET_KEY")) and bool(_price_id(plan))
 
 
 def _any_real_provider_configured() -> bool:
@@ -36,15 +49,27 @@ def _any_real_provider_configured() -> bool:
 @billing_bp.route("/checkout")
 @login_required
 def checkout():
-    if not _stripe_configured():
+    from plans import valid_plan, PLANS
+    plan = valid_plan(request.args.get("plan"))
+
+    # Already subscribed through Stripe and switching plans -> Stripe's own
+    # billing portal handles proration/upgrades properly.
+    if current_user.subscription_status == "active" and current_user.stripe_customer_id and _stripe_configured(plan):
+        if (current_user.plan or "starter") == plan:
+            flash(f"You're already on {PLANS[plan]['name']}.")
+            return redirect(url_for("dashboard"))
+        return redirect(url_for("billing.portal"))
+
+    if not _stripe_configured(plan):
         if _any_real_provider_configured():
             flash("Sign-ups are paused right now while billing is being finished -- please check back soon.")
             return redirect(url_for("dashboard"))
         current_user.subscription_status = "demo"
+        current_user.plan = plan
         db.session.commit()
-        msg = "This subscribed you in demo mode -- no charge made."
+        msg = f"You're on {PLANS[plan]['name']} in demo mode -- no charge made."
         if not IS_PRODUCTION:
-            msg += " Add STRIPE_SECRET_KEY and STRIPE_PRICE_ID in .env to take real payments."
+            msg += f" Add STRIPE_SECRET_KEY and {PRICE_ENV[plan]} in .env to take real payments."
         flash(msg)
         return redirect(url_for("dashboard"))
 
@@ -58,24 +83,42 @@ def checkout():
     session = stripe.checkout.Session.create(
         customer=current_user.stripe_customer_id,
         mode="subscription",
-        line_items=[{"price": PRICE_ID, "quantity": 1}],
+        line_items=[{"price": _price_id(plan), "quantity": 1}],
+        metadata={"plan": plan},
+        subscription_data={"metadata": {"plan": plan}},
         success_url=url_for("billing.success", _external=True) + "?session_id={CHECKOUT_SESSION_ID}",
         cancel_url=url_for("billing.cancel", _external=True),
     )
     return redirect(session.url, code=303)
 
 
+@billing_bp.route("/portal")
+@login_required
+def portal():
+    """Stripe-hosted page to switch plan, update card or cancel."""
+    if not (os.environ.get("STRIPE_SECRET_KEY") and current_user.stripe_customer_id):
+        flash("Billing management isn't available for this account.")
+        return redirect(url_for("dashboard"))
+    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+    session = stripe.billing_portal.Session.create(
+        customer=current_user.stripe_customer_id, return_url=url_for("dashboard", _external=True))
+    return redirect(session.url, code=303)
+
+
 @billing_bp.route("/success")
 @login_required
 def success():
+    from plans import valid_plan
     session_id = request.args.get("session_id")
-    if _stripe_configured() and session_id:
+    if os.environ.get("STRIPE_SECRET_KEY") and session_id:
         stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
         session = stripe.checkout.Session.retrieve(session_id)
-        current_user.subscription_status = "active"
-        current_user.stripe_subscription_id = session.subscription
-        db.session.commit()
-        flash("Subscription active -- you can now add businesses to monitor.")
+        if session.customer == current_user.stripe_customer_id:
+            current_user.subscription_status = "active"
+            current_user.stripe_subscription_id = session.subscription
+            current_user.plan = valid_plan((session.metadata or {}).get("plan"))
+            db.session.commit()
+            flash("Subscription active -- you can now add businesses to monitor.")
     return redirect(url_for("dashboard"))
 
 
@@ -91,7 +134,7 @@ def webhook():
     """Real production path: Stripe calls this on subscription lifecycle events.
     Keeps subscription_status in sync even if the user closes the tab after
     paying, or cancels/lapses later. No-ops harmlessly if Stripe isn't configured."""
-    if not _stripe_configured():
+    if not os.environ.get("STRIPE_SECRET_KEY"):
         return "", 200
 
     payload = request.data
@@ -114,7 +157,11 @@ def webhook():
         if event["type"] in ("customer.subscription.deleted",):
             user.subscription_status = "inactive"
         elif event["type"] in ("customer.subscription.updated", "customer.subscription.created"):
-            user.subscription_status = "active" if obj.get("status") == "active" else "inactive"
+            user.subscription_status = "active" if obj.get("status") in ("active", "trialing") else "inactive"
+            items = ((obj.get("items") or {}).get("data") or [])
+            plan = _plan_for_price(((items[0].get("price") or {}).get("id")) if items else None)
+            if plan:
+                user.plan = plan  # plan switches made in the billing portal
         db.session.commit()
 
     return "", 200

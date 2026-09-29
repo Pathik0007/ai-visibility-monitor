@@ -446,3 +446,57 @@ tr.you td { font-weight: 650; }
   .score-ring .num { font-size: 1.8rem; }
   ol.actions li { padding-left: 36px; }
 }
+
+/* nav: brand is a link home */
+a.brand { color: inherit; text-decoration: none; }
+a.brand:hover { text-decoration: none; opacity: 0.9; }
+@media (max-width: 560px) {
+  .nav-hide-sm { display: none; }
+  .brand { font-size: 0.92rem; }
+  .navlinks .btn-ghost { padding: 7px 12px; font-size: 0.82rem; }
+}
+
+/* report v3: profiles, quotes, sources */
+.profile-table { min-width: 560px; }
+.profile-table td, .profile-table th { font-size: 0.84rem; padding: 9px 6px; }
+.profile-table .muted, .muted { color: var(--muted-dim); }
+.upsell { font-size: 0.88rem; color: var(--muted); border-style: dashed; }
+.upsell strong { color: var(--text); }
+.quote-group { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.quote-group:last-of-type { border-bottom: none; }
+.quote-group.bad .quote-name { color: var(--bad); }
+.quote-name { font-weight: 650; font-size: 0.9rem; margin: 0 0 4px; }
+.quote-name .small { font-weight: 400; margin: 0 0 0 6px; }
+.quote { margin: 4px 0; font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
+.quote-src { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted-dim); background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 7px; margin-right: 8px; }
+.src-missed { font-size: 0.76rem; color: var(--muted-dim); white-space: nowrap; }
+
+/* plans + dashboard */
+.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .plan-grid { grid-template-columns: 1fr; } }
+.plan-grid .card { margin: 0; display: flex; flex-direction: column; }
+.plan-head { display: flex; align-items: center; justify-content: space-between; }
+.plan-head h3 { margin: 0; }
+.plan-features { list-style: none; padding: 0; margin: 12px 0 16px; flex: 1; text-align: left; }
+.plan-features li { position: relative; padding: 5px 0 5px 22px; font-size: 0.88rem; color: var(--muted); line-height: 1.45; }
+.plan-features li::before { content: "\2713"; position: absolute; left: 0; color: var(--good); font-weight: 700; }
+.plan-features strong { color: var(--text); }
+.plan-grid .btn, .plan-grid button { margin-top: auto; width: 100%; }
+a.biz-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
+a.biz-card:hover { border-color: var(--muted-dim); text-decoration: none; }
+.field-hint { color: var(--muted); font-size: 0.78rem; margin: 4px 0 0; }
+textarea { width: 100%; font-family: inherit; font-size: 0.95rem; background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; resize: vertical; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.chart .dot { fill: var(--accent); }
+.chart .grid { stroke: var(--border-soft); stroke-width: 1; }
+.chart-labels { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted-dim); }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn-row form { margin: 0; }
+.btn-row button, .btn-row .btn { width: auto; margin: 0; }
+.btn-danger { background: transparent; color: var(--bad); border: 1px solid rgba(248,113,113,0.35); box-shadow: none; }
+.btn-danger:hover { background: var(--bad-bg); box-shadow: none; }
+details.edit-box summary { font-size: 0.88rem; }

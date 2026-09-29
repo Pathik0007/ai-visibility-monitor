@@ -31,13 +31,7 @@
   </script>
 </head>
 <body>
-  <nav class="topnav">
-    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
-    <div class="navlinks">
-      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
-      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
-    </div>
-  </nav>
+  {% include "_nav.html" %}
   <div class="wrap">
     <header class="hero">
       <h1>Frequently asked questions</h1>

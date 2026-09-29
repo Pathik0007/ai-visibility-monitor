@@ -376,6 +376,57 @@ related bugs alongside it):
   button on reports; places autocomplete rate limit raised (normal typing
   across two fields could hit the old 30/min).
 
+**Sixth pass** (accuracy, real-world data, plans):
+
+- **Retired AI models replaced** -- `gemini-2.0-flash` was shut down on 1 June
+  2026 and DeepSeek retired `deepseek-chat`, so live checks on those would
+  have errored. Defaults are now `claude-sonnet-4-6`, `gpt-5.4-mini`,
+  `sonar`, `gemini-3.5-flash`, `deepseek-flash`, each overridable with
+  `CLAUDE_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` / `GEMINI_MODEL` /
+  `DEEPSEEK_MODEL`. `/healthz` shows which model each assistant uses.
+- **Answers use live web search, localised** -- ChatGPT now goes through the
+  Responses API with `web_search` (Chat Completions only used training
+  data). ChatGPT, Claude and Perplexity get the customer's country, city and
+  region, geocoded from the Location field. Gemini is grounded in Google
+  Search. DeepSeek has no search API, and the report says so.
+- **Sources captured** -- every answer keeps the pages the assistant read or
+  cited. The report shows "Where the assistants got their information" and
+  turns the top sites that didn't mention you into an action.
+- **Stricter, fairer matching** -- "Ace's Deep Sea Food" now matches "Aces
+  Deep Seafood" and "Kickin'Inn" matches "Kickin' Inn". Legal suffixes and
+  "The" are ignored. An answer that only says "I couldn't find information
+  about X" no longer counts as a recommendation; it gets its own finding and
+  fix. Sub-bullets ("- Address: ...") no longer inflate rank numbers or
+  appear as competitors.
+- **"What the assistants say"** -- the actual words used about you and your
+  top competitors, pulled from their answers.
+- **Google profile benchmark (Pro)** -- Places API (New) Text Search looks up
+  you and the most-recommended competitors: rating, review count, primary
+  category, website and weekend hours. It produces specific actions such as
+  "change your category to Seafood restaurant", "1,154 fewer reviews" or
+  "no website listed", plus a "not found on Google Maps" warning.
+- **Checks don't time out** -- all provider calls run at once with one
+  80-second deadline (`CHECK_TIMEOUT`), and Gunicorn's timeout is now 120s.
+  Live web-search answers take 20-40s each; the old 8-thread pool plus the
+  30s Gunicorn timeout would have killed real checks.
+- **Business suggestions stay in-country** -- the geocoded country goes to
+  Google as `includedRegionCodes`. `/healthz` shows the active search
+  backend and the last Google error (e.g. API not enabled).
+- **Navigation** -- a shared top bar on every page; the logo always goes
+  home. Logged-in users used to be redirected away from `/`, so the
+  homepage and free check were unreachable.
+- **Plans** -- Starter $29 and Pro $49 (see `plans.py`), with Stripe
+  `STRIPE_PRICE_ID` / `STRIPE_PRICE_ID_PRO`, a billing portal for switching
+  plan, and a webhook that syncs the plan.
+  - Pro adds: Google benchmark, up to 5 custom questions, 10 questions per
+    check, twice-weekly checks, 3 businesses, 10 competitors and CSV export.
+  - Subscribers can now edit or remove businesses and see a score chart.
+  - The scheduler runs every 6 hours in-process (or twice daily via cron)
+    and only re-checks businesses that are due.
+- **Free check is capped** at 6 questions and 5 competitors to control cost.
+- **Wasted API call removed** -- an optional Claude "extra questions" call
+  ran on every check, but its output was always discarded.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

@@ -1,0 +1,32 @@
+{# Starter vs Pro cards. `plan_cta` = "checkout" (logged in) or "signup". #}
+<div class="plan-grid">
+  {% for key in ['starter', 'pro'] %}{% set p = PLANS[key] %}
+  <div class="card pricing-card {{ 'glow' if key == 'pro' else '' }}">
+    <div class="plan-head">
+      <h3>{{ p.name }}</h3>
+      {% if key == 'pro' %}<span class="badge live">best value</span>{% endif %}
+    </div>
+    <div class="price">${{ p.price }}<span>/month</span></div>
+    <ul class="plan-features">
+      <li>{{ p.businesses }} business{{ 'es / locations' if p.businesses > 1 else '' }} monitored</li>
+      <li>{{ p.cadence }} automatic re-checks across 5 assistants</li>
+      <li>{{ p.questions }} customer questions per check</li>
+      <li>Track up to {{ p.competitors }} competitors</li>
+      <li>Email alerts when your visibility drops or a competitor overtakes you</li>
+      <li>Score history, sources the assistants cite, what they say about you</li>
+      {% if p.profile_benchmark %}<li><strong>Google profile benchmark</strong>: your rating, reviews, category and hours vs the businesses recommended instead</li>{% endif %}
+      {% if p.custom_questions %}<li><strong>Your own questions</strong> -- up to {{ p.custom_questions }} (e.g. “best gluten-free fish and chips in Ryde”)</li>{% endif %}
+      {% if p.csv_export %}<li>CSV export of every check</li>{% endif %}
+    </ul>
+    {% if plan_cta == 'checkout' %}
+      {% if user_plan and user_plan.key == key %}
+      <button type="button" class="btn-ghost" disabled>Your current plan</button>
+      {% else %}
+      <a class="btn" href="{{ url_for('billing.checkout', plan=key) }}">{{ 'Switch to' if user_plan else 'Choose' }} {{ p.name }} -- ${{ p.price }}/mo</a>
+      {% endif %}
+    {% else %}
+    <a class="btn" href="{{ url_for('auth.signup') }}">Start with {{ p.name }}</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>

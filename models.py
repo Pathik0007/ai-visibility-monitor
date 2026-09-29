@@ -18,6 +18,7 @@ class User(db.Model, UserMixin):
     stripe_subscription_id = db.Column(db.String(255))
     # "inactive" | "active" | "demo"  -- "demo" = Stripe not configured, treated as subscribed
     subscription_status = db.Column(db.String(50), default="inactive")
+    plan = db.Column(db.String(20), default="starter")  # see plans.py
 
     businesses = db.relationship("Business", backref="owner", cascade="all, delete-orphan")
 
@@ -39,6 +40,7 @@ class Business(db.Model):
     category = db.Column(db.String(255), nullable=False)
     location = db.Column(db.String(255), nullable=False)
     competitors = db.Column(db.Text, default="")
+    custom_questions = db.Column(db.Text, default="")  # Pro: one question per line
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     runs = db.relationship(
@@ -46,6 +48,9 @@ class Business(db.Model):
         cascade="all, delete-orphan",
         order_by="CheckRun.created_at",
     )
+
+    def custom_question_list(self) -> list[str]:
+        return [q.strip() for q in (self.custom_questions or "").splitlines() if q.strip()]
 
     def competitor_list(self) -> list[str]:
         return [c.strip() for c in (self.competitors or "").split(",") if c.strip()]
@@ -120,3 +125,24 @@ class AnonymousReport(db.Model):
     location = db.Column(db.String(255))
     report_json = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+def add_missing_columns() -> None:
+    """Tiny forward-only migration for columns added after a database was
+    first created (db.create_all() never alters existing tables). Safe to
+    run on every start, on SQLite and Postgres."""
+    from sqlalchemy import inspect, text
+    wanted = {
+        "user": [("plan", "VARCHAR(20) DEFAULT 'starter'")],
+        "business": [("custom_questions", "TEXT DEFAULT ''")],
+    }
+    insp = inspect(db.engine)
+    for table, cols in wanted.items():
+        if not insp.has_table(table):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in cols:
+            if name not in existing:
+                quoted = f'"{table}"'  # "user" is a reserved word in Postgres
+                db.session.execute(text(f"ALTER TABLE {quoted} ADD COLUMN {name} {ddl}"))
+    db.session.commit()

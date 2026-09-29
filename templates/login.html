@@ -7,8 +7,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <div class="wrap" style="max-width:420px; padding-top:60px;">
-    <div class="brand" style="justify-content:center; margin-bottom:24px;"><span class="logo">◎</span> AI Visibility Monitor</div>
+  {% include "_nav.html" %}
+  <div class="wrap" style="max-width:420px; padding-top:32px;">
     <h1 class="center">Welcome back</h1>
     {% with messages = get_flashed_messages() %}
       {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}

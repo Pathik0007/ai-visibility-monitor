@@ -27,7 +27,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 load_dotenv()
 
 from extensions import csrf, limiter
-from models import db, User, Business, CheckRun
+from models import db, User, Business, CheckRun, add_missing_columns
+from plans import PLANS, FREE_CHECK, plan_for
 from auth import auth_bp
 from billing import billing_bp
 from alerts import check_business_and_alert, run_weekly_checks
@@ -93,11 +94,17 @@ csrf.exempt(billing_bp)
 
 with app.app_context():
     db.create_all()
+    add_missing_columns()
 
 
 @app.context_processor
 def inject_globals():
-    return {"is_production": IS_PRODUCTION}
+    from flask_login import current_user as _cu
+    try:
+        user_plan = plan_for(_cu) if _cu.is_authenticated else None
+    except Exception:
+        user_plan = None
+    return {"is_production": IS_PRODUCTION, "PLANS": PLANS, "user_plan": user_plan}
 
 
 @app.after_request
@@ -181,8 +188,8 @@ _INDEXABLE_PAGES = ["index", "pricing", "faq", "about", "how_it_works", "privacy
 
 @app.route("/", methods=["GET"])
 def index():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+    # Logged-in users used to be bounced straight to /dashboard here, which
+    # made the homepage (and the free check) unreachable once signed in.
     provider_status = [{"name": p.display_name, "configured": p.is_configured()} for p in ALL_PROVIDERS]
     return render_template("index.html", provider_status=provider_status)
 
@@ -315,8 +322,9 @@ def api_places():
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
     session = valid_session_token(request.args.get("session"))
+    region = request.args.get("region")
     try:
-        results = search_places(query, lat=lat, lon=lon, session=session)
+        results = search_places(query, lat=lat, lon=lon, session=session, region=region)
     except Exception:
         results = []
     return {"results": results}
@@ -354,7 +362,8 @@ def api_geocode():
         result = geocode_location(query)
     except Exception:
         result = None
-    return {"lat": (result or {}).get("lat"), "lon": (result or {}).get("lon")}
+    result = result or {}
+    return {"lat": result.get("lat"), "lon": result.get("lon"), "country": result.get("country")}
 
 
 @app.route("/check", methods=["POST"])
@@ -366,7 +375,11 @@ def check():
         flash(str(e))
         return redirect(url_for("index"))
 
-    num_queries = _parse_num_queries(request.form)
+    num_queries = min(_parse_num_queries(request.form), max(FREE_CHECK["questions_options"]))
+    if len(fields["competitors"]) > FREE_CHECK["competitors"]:
+        flash(f"The free check compares up to {FREE_CHECK['competitors']} competitors -- "
+              f"subscribe to track more.")
+        return redirect(url_for("index"))
 
     report = run_visibility_check(
         fields["business"], fields["category"], fields["location"], fields["competitors"],
@@ -397,19 +410,42 @@ def check_report(report_id):
 @login_required
 def dashboard():
     businesses = Business.query.filter_by(user_id=current_user.id).all()
-    return render_template("dashboard.html", businesses=businesses)
+    plan = plan_for(current_user)
+    can_add = bool(plan) and len(businesses) < plan["businesses"]
+    return render_template("dashboard.html", businesses=businesses, plan=plan, can_add=can_add)
+
+
+def _plan_limited_fields(plan: dict, form) -> dict:
+    fields = parse_and_validate_business_fields(form)
+    if len(fields["competitors"]) > plan["competitors"]:
+        raise ValidationError(f"Your {plan['name']} plan tracks up to {plan['competitors']} competitors.")
+    questions = [q.strip() for q in form.get("custom_questions", "").splitlines() if q.strip()]
+    if questions and not plan["custom_questions"]:
+        raise ValidationError("Custom questions are part of the Pro plan.")
+    if len(questions) > plan["custom_questions"]:
+        raise ValidationError(f"Up to {plan['custom_questions']} custom questions.")
+    for q in questions:
+        if len(q) > 200:
+            raise ValidationError("Each custom question can be at most 200 characters.")
+    fields["custom_questions"] = questions
+    return fields
 
 
 @app.route("/businesses/new", methods=["POST"])
 @login_required
 @limiter.limit("10 per hour", key_func=lambda: current_user.get_id())
 def add_business():
-    if not current_user.is_subscribed:
-        flash("Subscribe first to add a business to monitor.")
+    plan = plan_for(current_user)
+    if not plan:
+        flash("Choose a plan first to add a business to monitor.")
+        return redirect(url_for("dashboard"))
+    if Business.query.filter_by(user_id=current_user.id).count() >= plan["businesses"]:
+        flash(f"Your {plan['name']} plan monitors {plan['businesses']} business"
+              f"{'es' if plan['businesses'] != 1 else ''}. Upgrade to Pro for up to {PLANS['pro']['businesses']}.")
         return redirect(url_for("dashboard"))
 
     try:
-        fields = parse_and_validate_business_fields(request.form)
+        fields = _plan_limited_fields(plan, request.form)
     except ValidationError as e:
         flash(str(e))
         return redirect(url_for("dashboard"))
@@ -420,12 +456,28 @@ def add_business():
         category=fields["category"],
         location=fields["location"],
         competitors=", ".join(fields["competitors"]),
+        custom_questions="\n".join(fields["custom_questions"]),
     )
     db.session.add(business)
     db.session.commit()
 
     check_business_and_alert(business)  # first run -- no "previous" yet, so no alert fires
     return redirect(url_for("business_detail", business_id=business.id))
+
+
+def _score_chart(history: list) -> dict | None:
+    """Points for a small inline SVG line chart of score over time (oldest
+    first), rendered server-side -- no chart library, no inline script."""
+    runs = [r for r in reversed(history) if r.visibility_score is not None][-20:]
+    if len(runs) < 2:
+        return None
+    w, h, pad = 600, 120, 10
+    step = (w - 2 * pad) / (len(runs) - 1)
+    pts = [(round(pad + i * step, 1), round(h - pad - (r.visibility_score / 100) * (h - 2 * pad), 1))
+           for i, r in enumerate(runs)]
+    return {"w": w, "h": h, "points": " ".join(f"{x},{y}" for x, y in pts),
+            "dots": [{"x": x, "y": y, "score": r.visibility_score, "date": r.created_at.strftime("%d %b")}
+                     for (x, y), r in zip(pts, runs)]}
 
 
 @app.route("/businesses/<int:business_id>")
@@ -437,7 +489,70 @@ def business_detail(business_id):
     previous = history[1] if len(history) > 1 else None
     report = ensure_insights(latest.report, location=business.location) if latest else None
     return render_template("business.html", business=business, history=history, latest=latest,
-                           previous=previous, report=report)
+                           previous=previous, report=report, plan=plan_for(current_user),
+                           chart=_score_chart(history))
+
+
+@app.route("/businesses/<int:business_id>/edit", methods=["POST"])
+@login_required
+def edit_business(business_id):
+    business = Business.query.filter_by(id=business_id, user_id=current_user.id).first_or_404()
+    plan = plan_for(current_user)
+    if not plan:
+        flash("Your subscription isn't active.")
+        return redirect(url_for("dashboard"))
+    form = request.form.to_dict()
+    form.setdefault("business", business.name)
+    form.setdefault("category", business.category)
+    form.setdefault("location", business.location)
+    try:
+        fields = _plan_limited_fields(plan, form)
+    except ValidationError as e:
+        flash(str(e))
+        return redirect(url_for("business_detail", business_id=business.id))
+    business.category = fields["category"]
+    business.location = fields["location"]
+    business.competitors = ", ".join(fields["competitors"])
+    business.custom_questions = "\n".join(fields["custom_questions"])
+    db.session.commit()
+    flash("Saved -- changes apply from the next check.")
+    return redirect(url_for("business_detail", business_id=business.id))
+
+
+@app.route("/businesses/<int:business_id>/delete", methods=["POST"])
+@login_required
+def delete_business(business_id):
+    business = Business.query.filter_by(id=business_id, user_id=current_user.id).first_or_404()
+    db.session.delete(business)
+    db.session.commit()
+    flash(f"Stopped monitoring {business.name}.")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/businesses/<int:business_id>/export.csv")
+@login_required
+def export_business_csv(business_id):
+    import csv
+    import io
+    business = Business.query.filter_by(id=business_id, user_id=current_user.id).first_or_404()
+    plan = plan_for(current_user)
+    if not plan or not plan["csv_export"]:
+        flash("CSV export is part of the Pro plan.")
+        return redirect(url_for("business_detail", business_id=business.id))
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["checked_at_utc", "visibility_score", "question", "assistant", "recommended", "rank",
+                "sample_data", "error", "other_businesses_named", "sources"])
+    for run in business.runs:
+        for r in run.report.get("results", []):
+            w.writerow([run.created_at.strftime("%Y-%m-%d %H:%M"), run.visibility_score, r.get("query"),
+                        r.get("provider"), "yes" if r.get("mentioned") else "no", r.get("position") or "",
+                        "yes" if r.get("is_demo") else "no", "yes" if r.get("error") else "no",
+                        "; ".join(r.get("competitors_mentioned") or []),
+                        " ".join(s.get("url", "") for s in r.get("sources") or [])])
+    safe_name = "".join(c if c.isalnum() else "-" for c in business.name.lower()).strip("-") or "business"
+    return app.response_class(buf.getvalue(), mimetype="text/csv",
+                              headers={"Content-Disposition": f'attachment; filename="{safe_name}-ai-visibility.csv"'})
 
 
 @app.route("/businesses/<int:business_id>/run", methods=["POST"])
@@ -445,6 +560,9 @@ def business_detail(business_id):
 @limiter.limit("6 per hour", key_func=lambda: current_user.get_id())
 def run_business_now(business_id):
     business = Business.query.filter_by(id=business_id, user_id=current_user.id).first_or_404()
+    if not plan_for(current_user):
+        flash("Your subscription isn't active.")
+        return redirect(url_for("dashboard"))
     check_business_and_alert(business)
     flash("Check complete.")
     return redirect(url_for("business_detail", business_id=business.id))
@@ -456,9 +574,12 @@ def run_business_now(business_id):
 def healthz():
     """Plain liveness check for uptime monitors / load balancers -- touches
     the DB too so a broken connection shows up as unhealthy, not just a 200."""
+    from places import google_status
     try:
         db.session.execute(db.text("SELECT 1"))
-        return {"status": "ok"}, 200
+        return {"status": "ok", **google_status(), "ai_providers": {
+            p.display_name: ("live: " + p.model()) if p.is_configured() else "sample (no API key)"
+            for p in ALL_PROVIDERS}}, 200
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}, 503
 
@@ -504,7 +625,7 @@ def server_error(e):
 
 if os.environ.get("ENABLE_INPROCESS_SCHEDULER", "1") == "1":
     scheduler = BackgroundScheduler()
-    scheduler.add_job(run_weekly_checks, "interval", weeks=1, args=[app], id="weekly_visibility_check")
+    scheduler.add_job(run_weekly_checks, "interval", hours=6, args=[app], id="weekly_visibility_check")  # only due businesses run
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
 

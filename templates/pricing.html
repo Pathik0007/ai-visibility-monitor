@@ -3,9 +3,9 @@
 <head><meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pricing -- AI Visibility Monitor</title>
-  <meta name="description" content="One plan: $29/month to monitor a business weekly across ChatGPT, Claude, Perplexity, Gemini and DeepSeek. The one-off check is always free.">
+  <meta name="description" content="Free one-off check. Starter $29/month for weekly monitoring; Pro $49/month adds Google profile benchmarks, your own questions and twice-weekly checks.">
   <meta property="og:title" content="Pricing -- AI Visibility Monitor">
-  <meta property="og:description" content="One plan: $29/month to monitor a business weekly across five AI assistants. The one-off check is always free.">
+  <meta property="og:description" content="Free check, Starter $29/month, Pro $49/month -- monitor how ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your business.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
   <meta property="og:url" content="{{ url_for('pricing', _external=True) }}">
@@ -16,13 +16,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <nav class="topnav">
-    <a class="brand" style="text-decoration:none; color:inherit;" href="{{ url_for('index') }}"><span class="logo">◎</span> AI Visibility Monitor</a>
-    <div class="navlinks">
-      <a class="btn-ghost" href="{{ url_for('auth.login') }}">Log in</a>
-      <a class="btn-ghost" href="{{ url_for('auth.signup') }}">Sign up</a>
-    </div>
-  </nav>
+  {% include "_nav.html" %}
   <div class="wrap">
     <header class="hero">
       <h1>Simple pricing</h1>
@@ -30,16 +24,17 @@
     </header>
 
     <div class="card pricing-card">
-      <h3 style="margin-top:0;">Free check</h3>
+      <div class="plan-head"><h3>Free check</h3></div>
       <div class="price">$0</div>
-      <p class="sub">Run a one-off visibility check any time -- no account needed.</p>
+      <p class="sub" style="margin-bottom:0;">One-off check across all 5 assistants, up to 6 questions and 5 competitors, with the full report -- no account needed. <a href="{{ url_for('index') }}">Run one now →</a></p>
     </div>
 
-    <div class="card glow pricing-card">
-      <h3 style="margin-top:0;">Monitored business</h3>
-      <div class="price">$29<span>/month</span></div>
-      <p class="sub" style="margin-bottom:18px;">Weekly automatic re-checks, history over time, and an email alert when your visibility changes.</p>
-      <a href="{{ url_for('auth.signup') }}"><button type="button">Get started</button></a>
+    {% set plan_cta = 'checkout' if current_user.is_authenticated else 'signup' %}
+    {% include "_plan_cards.html" %}
+
+    <div class="card" style="margin-top:16px;">
+      <h3 class="card-title">Why Pro costs more</h3>
+      <p class="sub small" style="margin:0;">Pro pulls live Google Maps data for you and your competitors on every check -- rating, review count, category, website and weekend hours -- so the report can say “they have 1,240 reviews, you have 86” instead of guessing. It also runs more questions, more often, including ones you write yourself.</p>
     </div>
 
     <p class="center sub">Questions? See the <a href="{{ url_for('faq') }}">FAQ</a>.</p>

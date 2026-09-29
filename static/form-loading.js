@@ -7,6 +7,12 @@
 (function () {
   "use strict";
   document.addEventListener("DOMContentLoaded", function () {
+    // Destructive actions ask first (no inline onsubmit -- CSP blocks inline JS).
+    document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        if (!window.confirm(form.getAttribute("data-confirm"))) e.preventDefault();
+      });
+    });
     document.querySelectorAll("form[data-loading-text]").forEach(function (form) {
       form.addEventListener("submit", function () {
         var btn = form.querySelector("button[type=submit]");

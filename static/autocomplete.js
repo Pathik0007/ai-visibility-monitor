@@ -45,7 +45,7 @@
     if (!locationInput) return { lat: null, lon: null };
     if (biasByLocationEl.has(locationInput)) return biasByLocationEl.get(locationInput);
 
-    var state = { lat: null, lon: null };
+    var state = { lat: null, lon: null, country: null };
     var runGeocode = debounce(function (text) {
       text = text.trim();
       if (text.length < 3) { state.lat = null; state.lon = null; return; }
@@ -55,6 +55,7 @@
           if (data && data.lat != null && data.lon != null) {
             state.lat = data.lat;
             state.lon = data.lon;
+            state.country = data.country || null;
           }
         })
         .catch(function () { /* silent -- search just stays unbiased */ });
@@ -81,6 +82,7 @@
     if (bias && bias.lat != null && bias.lon != null) {
       url += "&lat=" + encodeURIComponent(bias.lat) + "&lon=" + encodeURIComponent(bias.lon);
     }
+    if (bias && bias.country) url += "&region=" + encodeURIComponent(bias.country);
     if (session) url += "&session=" + encodeURIComponent(session);
     return url;
   }

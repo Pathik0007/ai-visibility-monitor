@@ -7,17 +7,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <nav class="topnav">
-    <div class="brand"><span class="logo">◎</span> AI Visibility Monitor</div>
-    <div class="navlinks"><a class="btn-ghost" href="{{ url_for('auth.logout') }}">Log out</a></div>
-  </nav>
+  {% include "_nav.html" %}
   <div class="wrap" style="padding-top:24px;">
     <h1>Your businesses</h1>
     <p class="sub">{{ current_user.email }} &middot;
-      {% if current_user.is_subscribed %}
-        <span style="color:var(--good);">subscribed{{ ' (demo)' if current_user.subscription_status == 'demo' else '' }}</span>
+      {% if plan %}
+        <span style="color:var(--good);">{{ plan.name }} plan{{ ' (demo)' if current_user.subscription_status == 'demo' else '' }}</span>
+        &middot; {{ businesses|length }} of {{ plan.businesses }} business{{ 'es' if plan.businesses != 1 else '' }}
+        {% if current_user.subscription_status == 'active' %}&middot; <a href="{{ url_for('billing.portal') }}">Manage billing</a>{% endif %}
       {% else %}
-        <span style="color:var(--bad);">not subscribed</span>
+        <span style="color:var(--bad);">no plan yet</span>
       {% endif %}
     </p>
 
@@ -25,55 +24,62 @@
       {% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}
     {% endwith %}
 
-    {% if not current_user.is_subscribed %}
-    <div class="card">
-      <h3 style="margin-top:0;">Subscribe to monitor a business</h3>
-      <p class="sub" style="margin-bottom:0;">Weekly automatic re-checks and email alerts when your visibility changes.</p>
-      <a href="{{ url_for('billing.checkout') }}"><button type="button">Subscribe -- $29/month</button></a>
-    </div>
-    {% endif %}
-
     {% for b in businesses %}
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <strong>{{ b.name }}</strong>
-          <div class="sub" style="margin:2px 0 0;">{{ b.category }} &middot; {{ b.location }}</div>
-        </div>
-        {% if b.latest_run and b.latest_run.visibility_score is not none %}
-        <div class="score {{ 'good' if b.latest_run.visibility_score >= 70 else ('mid' if b.latest_run.visibility_score >= 40 else 'bad') }}" style="font-size:1.8rem;">
-          {{ b.latest_run.visibility_score }}%
-        </div>
-        {% elif b.latest_run %}
-        <div class="score bad" style="font-size:1.8rem;">N/A</div>
-        {% endif %}
+    <a class="card biz-card" href="{{ url_for('business_detail', business_id=b.id) }}">
+      <div>
+        <strong>{{ b.name }}</strong>
+        <div class="sub" style="margin:2px 0 0;">{{ b.category }} &middot; {{ b.location }}</div>
+        <div class="sub small" style="margin:4px 0 0;">{% if b.latest_run %}Last checked {{ b.latest_run.created_at.strftime('%d %b %Y') }}{% else %}Not checked yet{% endif %} &middot; view report &rarr;</div>
       </div>
-      <a class="back" href="{{ url_for('business_detail', business_id=b.id) }}">view history &rarr;</a>
-    </div>
+      {% if b.latest_run and b.latest_run.visibility_score is not none %}
+      <div class="score {{ 'good' if b.latest_run.visibility_score >= 70 else ('mid' if b.latest_run.visibility_score >= 40 else 'bad') }}" style="font-size:1.8rem;">{{ b.latest_run.visibility_score }}%</div>
+      {% elif b.latest_run %}
+      <div class="score bad" style="font-size:1.8rem;">N/A</div>
+      {% endif %}
+    </a>
     {% else %}
-    <p class="sub">No businesses yet.</p>
+    {% if plan %}<p class="sub">No businesses yet -- add your first one below.</p>{% endif %}
     {% endfor %}
 
-    {% if current_user.is_subscribed %}
-    <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check…">
+    {% if not plan %}
+    <h3 style="margin-top:8px;">Pick a plan to start monitoring</h3>
+    <p class="sub small">Automatic re-checks, email alerts and history. The one-off <a href="{{ url_for('index') }}">free check</a> stays free.</p>
+    {% set plan_cta = 'checkout' %}{% include "_plan_cards.html" %}
+    {% elif can_add %}
+    <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check (up to a minute)…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 style="margin-top:0;">Add a business to monitor</h3>
       <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. Parramatta, Sydney">
-      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Fill this in first -- it sharpens the business search below to your area.</p>
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW">
+      <p class="field-hint">Your suburb -- that's how customers ask, and it focuses the business search below on your area.</p>
       <label for="name">Business name</label>
       <input id="name" name="name" required maxlength="200" autocomplete="off"
              data-autocomplete-name="1" data-autocomplete-category="category" data-autocomplete-location="location">
-      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Start typing to search -- picking a result fills in the category (and location, if you skipped it above).</p>
+      <p class="field-hint">Start typing and pick your business -- category and suburb fill in automatically.</p>
       <label for="category">Category</label>
       <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, seafood restaurant, plumber"
              data-autocomplete-categories="1">
-      <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Auto-fills when you pick a business above -- or start typing to pick from the list.</p>
-      <label for="competitors">Competitors (comma-separated, optional, up to 10)</label>
+      <label for="competitors">Competitors (comma-separated, optional, up to {{ plan.competitors }})</label>
       <input id="competitors" name="competitors" maxlength="1000"
              data-autocomplete-multi="1" data-autocomplete-location="location">
+      {% if plan.custom_questions %}
+      <label for="custom_questions">Your own questions (optional, one per line, up to {{ plan.custom_questions }})</label>
+      <textarea id="custom_questions" name="custom_questions" rows="3" maxlength="1100" placeholder="e.g. Where can I get gluten-free fish and chips in Ryde?"></textarea>
+      {% endif %}
       <button type="submit">Add &amp; run first check</button>
     </form>
+    {% else %}
+    <div class="card upsell">
+      You're monitoring {{ businesses|length }} of {{ plan.businesses }} business{{ 'es' if plan.businesses != 1 else '' }} on {{ plan.name }}.
+      {% if plan.key == 'starter' %}<a href="{{ url_for('billing.checkout', plan='pro') }}">Upgrade to Pro</a> for up to {{ PLANS.pro.businesses }}, Google profile benchmarks and your own questions.{% else %}Remove one to add another.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if plan and plan.key == 'starter' and businesses %}
+    <div class="card upsell">
+      <strong>Pro ($49/mo):</strong> Google rating &amp; review benchmark vs competitors, your own questions, 10 questions per check, twice-weekly checks, up to 3 businesses.
+      <a href="{{ url_for('billing.checkout', plan='pro') }}">Upgrade →</a>
+    </div>
     {% endif %}
   </div>
   <script src="/static/autocomplete.js" defer></script>
