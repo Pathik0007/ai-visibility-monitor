@@ -14,6 +14,18 @@
 </div>
 {% endif %}
 
+{% if ins.competitor_flags %}
+<div class="notice notice-info">
+  <strong>About your competitor list</strong>
+  <ul class="flag-list">
+    {% for f in ins.competitor_flags %}
+    <li>{% if f.excluded %}<span class="pill no">not compared</span>{% else %}<span class="pill warn">check</span>{% endif %} {{ f.message }}</li>
+    {% endfor %}
+  </ul>
+  {% if ins.competitor_flags|selectattr('excluded')|list %}<p class="small" style="margin:6px 0 0;">Add businesses of the same type for a meaningful comparison -- the assistants' own picks are listed below under “Who else gets recommended”.</p>{% endif %}
+</div>
+{% endif %}
+
 <div class="card glow">
   <div class="score-hero">
     {% if report.visibility_score is none %}

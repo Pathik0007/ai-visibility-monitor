@@ -402,6 +402,7 @@ def derive_insights(report: dict, location: str = "") -> dict:
         "profiles": {"you": you_p, "competitors": comp_p} if you_p else None,
         "profiles_status": profiles.get("reason") if profiles and not profiles.get("available") else None,
         "live_search_engines": sorted({r["provider"] for r in ok_results if r.get("live_search")}),
+        "competitor_flags": report.get("competitor_flags") or [],
         "playbook_label": label,
         "playbook": playbook,
         "all_demo": bool(results) and all(r.get("is_demo") for r in results),

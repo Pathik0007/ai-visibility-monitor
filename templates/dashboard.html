@@ -46,9 +46,15 @@
     <p class="sub small">Automatic re-checks, email alerts and history. The one-off <a href="{{ url_for('index') }}">free check</a> stays free.</p>
     {% set plan_cta = 'checkout' %}{% include "_plan_cards.html" %}
     {% elif can_add %}
-    <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check (up to a minute)…">
+    <form class="card" method="POST" action="{{ url_for('add_business') }}" data-loading-text="Running first check (up to a minute)…" data-smart-form data-name="name" data-category="category" data-location="location" data-competitors="competitors" data-business-link="business_link" data-competitor-link="competitor_link">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="competitor_meta" value="{}">
       <h3 style="margin-top:0;">Add a business to monitor</h3>
+      <label for="business_link">Google Maps link <span class="label-note">(fastest -- fills everything below)</span></label>
+      <input id="business_link" type="text" inputmode="url" autocomplete="off" placeholder="Paste your business's Google Maps link"
+             data-link-for="business">
+      <p class="link-status" id="business_link-status">In Google Maps: open your business &rarr; Share &rarr; Copy link.</p>
+      <div class="or-divider">or fill in</div>
       <label for="location">Location</label>
       <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW" autocomplete="off" data-autocomplete-location-field="1">
       <p class="field-hint">Your suburb -- that's how customers ask, and it focuses the business search below on your area.</p>
@@ -62,6 +68,9 @@
       <label for="competitors">Competitors (comma-separated, optional, up to {{ plan.competitors }})</label>
       <input id="competitors" name="competitors" maxlength="1000"
              data-autocomplete-multi="1" data-autocomplete-location="location">
+      <input id="competitor_link" type="text" inputmode="url" autocomplete="off" placeholder="…or paste a competitor's Google Maps link to add it"
+             data-link-for="competitor" style="margin-top:8px;">
+      <p class="link-status" id="competitor_link-status"></p>
       {% if plan.custom_questions %}
       <label for="custom_questions">Your own questions (optional, one per line, up to {{ plan.custom_questions }})</label>
       <textarea id="custom_questions" name="custom_questions" rows="3" maxlength="1100" placeholder="e.g. Where can I get gluten-free fish and chips in Ryde?"></textarea>
@@ -84,5 +93,6 @@
   </div>
   <script src="/static/autocomplete.js" defer></script>
   <script src="/static/form-loading.js" defer></script>
+  <script src="/static/smart-fields.js" defer></script>
 </body>
 </html>

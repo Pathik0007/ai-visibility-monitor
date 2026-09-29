@@ -67,8 +67,14 @@
       </p>
     </div>
 
-    <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Asking 5 assistants — this takes up to a minute…">
+    <form class="card glow" method="POST" action="{{ url_for('check') }}" data-loading-text="Asking 5 assistants — this takes up to a minute…" data-smart-form data-name="business" data-category="category" data-location="location" data-competitors="competitors" data-business-link="business_link" data-competitor-link="competitor_link">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="competitor_meta" value="{}">
+      <label for="business_link">Google Maps link <span class="label-note">(fastest -- fills everything below)</span></label>
+      <input id="business_link" type="text" inputmode="url" autocomplete="off" placeholder="Paste your business's Google Maps link"
+             data-link-for="business">
+      <p class="link-status" id="business_link-status">In Google Maps: open your business &rarr; Share &rarr; Copy link.</p>
+      <div class="or-divider">or fill in</div>
 
       <label for="location">Location</label>
       <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW" autocomplete="off" data-autocomplete-location-field="1">
@@ -87,6 +93,9 @@
       <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 5)</span></label>
       <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care"
              data-autocomplete-multi="1" data-autocomplete-location="location">
+      <input id="competitor_link" type="text" inputmode="url" autocomplete="off" placeholder="…or paste a competitor's Google Maps link to add it"
+             data-link-for="competitor" style="margin-top:8px;">
+      <p class="link-status" id="competitor_link-status"></p>
 
       <label for="num_queries">Number of questions to test</label>
       <select id="num_queries" name="num_queries">
@@ -138,5 +147,6 @@
 
   <script src="/static/autocomplete.js" defer></script>
   <script src="/static/form-loading.js" defer></script>
+  <script src="/static/smart-fields.js" defer></script>
 </body>
 </html>

@@ -74,8 +74,9 @@
     <div class="card">
       <details class="edit-box">
         <summary>Edit competitors{% if plan and plan.custom_questions %}, your own questions{% endif %}, category or location</summary>
-        <form method="POST" action="{{ url_for('edit_business', business_id=business.id) }}">
+        <form method="POST" action="{{ url_for('edit_business', business_id=business.id) }}" data-smart-form data-name="" data-category="category" data-location="location" data-competitors="competitors" data-business-link="business_link" data-competitor-link="competitor_link">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="competitor_meta" value="{{ business.competitor_meta or '{}' }}">
           <label for="location">Location</label>
           <input id="location" name="location" required maxlength="200" value="{{ business.location }}" autocomplete="off" data-autocomplete-location-field="1">
           <label for="category">Category</label>
@@ -83,6 +84,9 @@
           <label for="competitors">Competitors (comma-separated{% if plan %}, up to {{ plan.competitors }}{% endif %})</label>
           <input id="competitors" name="competitors" maxlength="1000" value="{{ business.competitors }}"
                  data-autocomplete-multi="1" data-autocomplete-location="location">
+          <input id="competitor_link" type="text" inputmode="url" autocomplete="off" placeholder="…or paste a competitor's Google Maps link to add it"
+                 data-link-for="competitor" style="margin-top:8px;">
+          <p class="link-status" id="competitor_link-status"></p>
           {% if plan and plan.custom_questions %}
           <label for="custom_questions">Your own questions (one per line, up to {{ plan.custom_questions }})</label>
           <textarea id="custom_questions" name="custom_questions" rows="4" maxlength="1100">{{ business.custom_questions or '' }}</textarea>
@@ -101,5 +105,6 @@
   </div>
   <script src="/static/autocomplete.js" defer></script>
   <script src="/static/form-loading.js" defer></script>
+  <script src="/static/smart-fields.js" defer></script>
 </body>
 </html>

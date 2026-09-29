@@ -85,12 +85,15 @@ def check_business_and_alert(business: Business) -> CheckRun:
     previous = business.latest_run  # last run *before* this new one
     plan = plan_for(business.owner) or PLANS["starter"]
 
+    from category_match import screen_competitors
+    tracked, flags = screen_competitors(business.category, business.competitor_list(), business.competitor_meta_dict())
     report = run_visibility_check(
-        business.name, business.category, business.location, business.competitor_list(),
+        business.name, business.category, business.location, tracked,
         num_queries=plan["questions"],
         extra_queries=business.custom_question_list()[: plan["custom_questions"]],
         profile_benchmark=plan["profile_benchmark"],
     )
+    report["competitor_flags"] = flags
     run = CheckRun.from_report(business.id, report)
     db.session.add(run)
     db.session.commit()

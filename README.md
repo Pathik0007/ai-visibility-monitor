@@ -460,6 +460,36 @@ returned an auto shop in Aruba):
 - **UI**: matched words are bolded, distance is shown ("Herring Road,
   Macquarie Park - 200 m"), and a "Searching..." state appears.
 
+**Eighth pass** (Google Maps links, competitor sanity checks):
+
+- **Paste a Google Maps link** in the new box at the top of every business
+  form (free check, add business, edit), or paste it straight into Business
+  name / Competitors. `links.py` reads it right away and fills name,
+  category and suburb; a competitor link adds that competitor.
+  - Link types: long `/maps/place/...` URLs, `maps.app.goo.gl` / `goo.gl`
+    share links, `g.page`, `g.co/kgs`, `share.google`, `?q=Name, Address`,
+    `/maps/search/...` and `query_place_id` / `place_id:`.
+  - Safety: short links are expanded one redirect at a time and only to
+    Google hosts (never an arbitrary URL; tested). Google's consent page is
+    unwrapped.
+  - With `GOOGLE_PLACES_API_KEY`, the place is looked up in Places API (New)
+    (place ID, or name + the link's coordinates) for the exact category and
+    suburb.
+  - Without a key: the name comes from the link, the suburb from free
+    reverse geocoding, and the category from OSM or guessed from the name.
+  - Links that carry no business information (e.g. `?cid=` only) get a clear
+    "use the Share button" message.
+- **Competitor category check** (`category_match.py`): every competitor with
+  a known category is compared with yours by industry group.
+  - A different industry (cafe vs car wash) is a **mismatch**: flagged live
+    with a Remove button, left out of tracking, and explained in the report
+    under "About your competitor list".
+  - The same industry but a different specialty (plumber vs electrician,
+    dentist vs physio) gets a softer note.
+  - Categories travel in a hidden `competitor_meta` field, so the server
+    makes the same call. They're stored per monitored business and applied
+    on every scheduled re-check.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

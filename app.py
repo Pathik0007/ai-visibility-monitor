@@ -16,6 +16,7 @@ Then open http://localhost:5000
 
 from __future__ import annotations
 import os
+import json
 import atexit
 from datetime import date
 from dotenv import load_dotenv
@@ -163,9 +164,14 @@ def parse_and_validate_business_fields(form) -> dict:
         if len(c) > MAX_NAME_LEN:
             raise ValidationError(f"Competitor name too long (max {MAX_NAME_LEN} characters).")
 
+    from category_match import parse_meta, screen_competitors
+    meta = parse_meta(form.get("competitor_meta", ""))
+    tracked, flagged = screen_competitors(category, competitors_raw, meta)
     return {
         "business": business, "category": category,
         "location": location, "competitors": competitors_raw,
+        "tracked_competitors": tracked, "competitor_flags": flagged,
+        "competitor_meta": {k: v for k, v in meta.items() if k in competitors_raw},
     }
 
 
@@ -359,6 +365,28 @@ def api_place_details():
     return details or {}
 
 
+@app.route("/api/resolve-link")
+@limiter.limit("20 per minute")
+def api_resolve_link():
+    """Paste-a-Google-Maps-link: returns the business's name, category and
+    suburb (see links.py). Always 200 with {"ok": bool, ...}."""
+    from links import resolve_link
+    try:
+        return resolve_link(request.args.get("url", ""))
+    except Exception:
+        return {"ok": False, "error": "Couldn't read that link -- type the name instead."}
+
+
+@app.route("/api/category-check")
+@limiter.limit("120 per minute")
+def api_category_check():
+    """Is each competitor category the same kind of business as ours?"""
+    from category_match import compare
+    business = request.args.get("business", "")[:100]
+    cats = [c[:100] for c in request.args.getlist("c")[:20]]
+    return {"results": [compare(business, c) for c in cats]}
+
+
 @app.route("/api/categories")
 @limiter.limit("60 per minute")
 def api_categories():
@@ -399,9 +427,10 @@ def check():
         return redirect(url_for("index"))
 
     report = run_visibility_check(
-        fields["business"], fields["category"], fields["location"], fields["competitors"],
+        fields["business"], fields["category"], fields["location"], fields["tracked_competitors"],
         num_queries=num_queries,
     )
+    report["competitor_flags"] = fields["competitor_flags"]
     # Post/redirect/get: the report lives at its own shareable, refresh-safe
     # URL instead of being rendered straight from this POST handler (which
     # made refreshing the page re-run -- and re-bill -- the whole check).
@@ -474,6 +503,7 @@ def add_business():
         location=fields["location"],
         competitors=", ".join(fields["competitors"]),
         custom_questions="\n".join(fields["custom_questions"]),
+        competitor_meta=json.dumps(fields["competitor_meta"]),
     )
     db.session.add(business)
     db.session.commit()
@@ -531,6 +561,9 @@ def edit_business(business_id):
     business.location = fields["location"]
     business.competitors = ", ".join(fields["competitors"])
     business.custom_questions = "\n".join(fields["custom_questions"])
+    old_meta = business.competitor_meta_dict()
+    business.competitor_meta = json.dumps({**{k: v for k, v in old_meta.items() if k in fields["competitors"]},
+                                           **fields["competitor_meta"]})
     db.session.commit()
     flash("Saved -- changes apply from the next check.")
     return redirect(url_for("business_detail", business_id=business.id))

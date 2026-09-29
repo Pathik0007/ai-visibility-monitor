@@ -27,6 +27,11 @@
 (function () {
   "use strict";
 
+  // Tell other scripts (smart-fields.js) a field was filled programmatically.
+  function notify(el, detail) {
+    try { el.dispatchEvent(new CustomEvent("avm:filled", { bubbles: true, detail: detail || {} })); } catch (e) {}
+  }
+
   function debounce(fn, wait) {
     var t = null;
     return function () {
@@ -275,6 +280,7 @@
       nameInput.value = result.name || nameInput.value;
       if (categoryInput && result.category) categoryInput.value = result.category;
       if (locationInput && result.location && !locationInput.value.trim()) locationInput.value = result.location;
+      notify(nameInput, { field: "business", result: result });
       if (result.place_id) {
         // Exact suburb/city + category from Google for the picked place.
         var pickedSession = session;
@@ -284,6 +290,7 @@
             if (!d) return;
             if (categoryInput && d.category) categoryInput.value = d.category;
             if (locationInput && d.location && !locationInput.dataset.userTyped) locationInput.value = d.location;
+            notify(nameInput, { field: "business", result: d });
           })
           .catch(function () {});
       }
@@ -342,6 +349,7 @@
       parts[parts.length - 1] = " " + (result.name || currentSegment());
       input.value = parts.join(",").replace(/^,\s*/, "").trim() + ", ";
       input.focus();
+      notify(input, { field: "competitor", name: result.name, category: result.category || "" });
     });
 
     var requestSeq = 0;
@@ -369,7 +377,7 @@
   function attachCategoryAutocomplete(inputId) {
     var input = document.getElementById(inputId);
     if (!input) return;
-    var widget = buildWidget(input, function (result) { input.value = result.name; });
+    var widget = buildWidget(input, function (result) { input.value = result.name; notify(input, { field: "category" }); });
     var requestSeq = 0;
     var runSearch = debounce(function (query) {
       var seq = ++requestSeq;
@@ -428,6 +436,7 @@
   }
 
   window.attachLocationAutocomplete = attachLocationAutocomplete;
+  window.avmLocationBias = getLocationBias;
   window.attachPlaceAutocomplete = attachPlaceAutocomplete;
   window.attachCategoryAutocomplete = attachCategoryAutocomplete;
   window.attachMultiValueAutocomplete = attachMultiValueAutocomplete;
