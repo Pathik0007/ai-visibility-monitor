@@ -408,3 +408,54 @@ def search_categories(query: str, limit: int = 8) -> list[str]:
             seen.add(c)
             out.append(c)
     return out[:limit]
+
+
+def guess_from_name(name: str) -> str:
+    """Category from the name itself ("Sparkle Car Wash" -> "car wash")."""
+    import re
+    low = " " + re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower()) + " "
+    best = ""
+    for c in CATEGORIES:
+        if f" {c} " in low and len(c) > len(best):
+            best = c
+    if best:
+        return best
+    for word, cat in (("cafe", "cafe"), ("coffee", "cafe"), ("dental", "dentist"), ("pizza", "pizza restaurant"),
+                      ("sushi", "sushi restaurant"), ("seafood", "seafood restaurant"), ("fish", "fish and chips shop"),
+                      ("barber", "barber shop"), ("hair", "hair salon"), ("nails", "nail salon"), ("plumb", "plumber"),
+                      ("electric", "electrician"), ("physio", "physiotherapist"), ("vet", "veterinarian"),
+                      ("wash", "car wash"), ("auto", "car repair shop"), ("motor", "car repair shop"),
+                      ("bakery", "bakery"), ("kebab", "kebab shop"), ("burger", "burger restaurant"), ("chicken", "chicken restaurant"), ("ramen", "ramen restaurant"),
+                      ("indian", "indian restaurant"), ("italian", "italian restaurant"), ("chinese", "chinese restaurant"),
+                      ("dumpling", "dumpling restaurant"), ("gelato", "gelato shop"), ("donut", "donut shop"), ("brew", "brewery"),
+                      ("thai", "thai restaurant"), ("gym", "gym"), ("tutor", "tutoring service"),
+                      ("school", "school"), ("clinic", "medical centre"), ("pharmacy", "pharmacy")):
+        if re.search(r"\b" + word, low):
+            return cat
+    return ""
+
+
+# Categories too broad to test usefully: "best restaurant in North Ryde" is
+# a question big venues win; customers of a burger shop ask for burgers.
+GENERIC_CATEGORIES = {
+    "restaurant", "restaurants", "food", "eatery", "takeaway", "takeaway restaurant", "fast food",
+    "fast food restaurant", "shop", "store", "retail", "business", "service", "services", "clinic",
+    "health", "medical", "salon", "point of interest", "establishment", "company", "contractor",
+}
+
+
+def refine_category(name: str, category: str) -> tuple[str, str | None]:
+    """("The Burger Boys", "restaurant") -> ("burger restaurant", note).
+    Only ever narrows a generic category using the business's own name;
+    anything already specific is left exactly as the user gave it."""
+    cat = " ".join((category or "").split())
+    if cat.lower() not in GENERIC_CATEGORIES:
+        return cat, None
+    guess = guess_from_name(name)
+    if not guess or guess.lower() == cat.lower() or guess.lower() in GENERIC_CATEGORIES:
+        return cat, None
+    from category_match import compare
+    if compare(cat, guess)["verdict"] == "mismatch":
+        return cat, None
+    return guess, (f"Checked as \u201c{guess}\u201d rather than \u201c{cat}\u201d (from the business name) -- "
+                   f"customers ask for the specific thing, and broad questions favour big venues.")

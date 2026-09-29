@@ -14,6 +14,9 @@
 </div>
 {% endif %}
 
+{% if ins.category_note %}
+<div class="notice notice-info"><strong>Category:</strong> {{ ins.category_note }}</div>
+{% endif %}
 {% if ins.competitor_flags %}
 <div class="notice notice-info">
   <strong>About your competitor list</strong>
@@ -49,7 +52,8 @@
 
 {% if ins.actions or ins.playbook %}
 <div class="card">
-  <h3 class="card-title">What to do next</h3>
+  <h3 class="card-title">What to do next{% if ins.all_demo %} <span class="badge demo">example</span>{% endif %}</h3>
+  {% if ins.all_demo %}<p class="sub small" style="margin:0 0 4px;">Example steps generated from the sample answers above -- your real steps appear once live checks are on.</p>{% endif %}
   {% if ins.actions %}
   <ol class="actions">
     {% for a in ins.actions %}

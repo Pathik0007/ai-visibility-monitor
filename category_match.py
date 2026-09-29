@@ -73,6 +73,11 @@ _COMPILED = [(key, label, re.compile(rx, re.I)) for key, label, rx in _GROUPS]
 # In these industries the specialty matters: a plumber doesn't compete with
 # an electrician, nor a dentist with a physio, even though they share a group.
 _SPECIALTIES = {
+    "food": ["burger", "pizz", "sushi|japanese|ramen", "fish|seafood",
+             "cafe|café|coffee|brunch|breakfast|bakery|cake|patisserie", "donut|dessert|gelato|ice cream", "indian", "thai", "chinese|dumpling|yum cha",
+             "italian|pasta", "mexican|taco", "kebab|lebanese|turkish|middle eastern", "chicken", "vietnamese|pho",
+             "korean", "bars?\\b|pubs?\\b|wine|cocktail|brewery", "steak", "vegan|vegetarian", "bubble tea|tea house",
+             "caterer|catering"],
     "health": ["dent|orthodont", "physio", "chiropract", "optometr|optician", "psycholog", "podiatr",
                "pharmac|chemist", "doctor|gp|general practitioner|medical cent", "dermatolog|skin",
                "osteopath", "naturopath", "dietitian|nutritionist", "hearing|audiolog", "speech", "cosmetic"],
@@ -120,6 +125,7 @@ def compare(business_category: str | None, competitor_category: str | None) -> d
         "business_group": a[1] if a else None,
         "competitor_group": b[1] if b else None,
         "competitor_category": competitor_category or "",
+        "group_key": a[0] if a else None,
     }
 
 
@@ -134,6 +140,10 @@ def mismatch_message(name: str, business_category: str, result: dict) -> str:
 
 
 def specialty_message(name: str, business_category: str, result: dict) -> str:
+    if result.get("group_key") == "food":
+        return (f"{name} is {_an(result['competitor_category'])} -- different food from {_an(business_category)}. "
+                f"You'll only compete on broad questions (\u201ctakeaway near me\u201d), so it's kept but treat it as a "
+                f"partial competitor.")
     return (f"{name} is {_an(result['competitor_category'])}, a different specialty from {business_category} -- "
             f"customers rarely choose between the two, so it may not be a useful comparison.")
 
@@ -164,12 +174,25 @@ def screen_competitors(business_category: str, competitors: list[str], meta: dic
     left out of tracking; different specialties are kept but noted."""
     from ai_visibility.analyzer import names_match
     kept, flagged = [], []
+    from categories import refine_category, guess_from_name
     for name in competitors:
         cat = meta.get(name) or next((v for k, v in meta.items() if names_match(k, name)), "")
+        inferred = False
+        if cat:
+            cat = refine_category(name, cat)[0]  # "restaurant" says little; the name often says more
+        else:
+            cat, inferred = guess_from_name(name), True
         if not cat:
             kept.append(name)
             continue
         res = compare(business_category, cat)
+        if inferred and res["verdict"] == "mismatch":
+            # Only guessed from the name -- never drop a competitor on a guess.
+            flagged.append({"name": name, "category": cat, "verdict": "possible_mismatch", "excluded": False,
+                            "message": f"{name} sounds like {_an(cat)}, not {_an(business_category)}. If that's right, "
+                                       f"assistants won't compare the two -- consider replacing it."})
+            kept.append(name)
+            continue
         if res["verdict"] == "mismatch":
             flagged.append({"name": name, "category": cat, "verdict": "mismatch", "excluded": True,
                             "message": mismatch_message(name, business_category, res)})

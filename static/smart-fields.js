@@ -85,21 +85,26 @@
       var seq = ++checkSeq;
       if (!names.length || !business) { warnBox.innerHTML = ""; return; }
       var url = "/api/category-check?business=" + encodeURIComponent(business) +
-        names.map(function (n) { return "&c=" + encodeURIComponent(kept[n]); }).join("");
+        "&name=" + encodeURIComponent(nameEl ? nameEl.value.trim() : "") +
+        names.map(function (n) { return "&c=" + encodeURIComponent(kept[n]) + "&n=" + encodeURIComponent(n); }).join("");
       fetch(url).then(function (r) { return r.ok ? r.json() : { results: [] }; }).then(function (data) {
         if (seq !== checkSeq) return;
         warnBox.innerHTML = "";
         (data.results || []).forEach(function (res, i) {
           if (res.verdict !== "mismatch" && res.verdict !== "different_specialty") return;
           var name = names[i];
+          var business = res.business_category || catEl.value.trim();
           var row = document.createElement("div");
           row.className = "comp-warn" + (res.verdict === "different_specialty" ? " soft" : "");
           var msg = document.createElement("span");
           msg.textContent = res.verdict === "mismatch"
             ? "⚠ " + name + " is " + an(res.competitor_category) + " (" + (res.competitor_group || "").toLowerCase() +
               "), not " + an(business) + ". AI assistants won't recommend one instead of the other, so it won't be compared."
-            : name + " is " + an(res.competitor_category) + " — a different specialty from " + business +
-              ". Customers rarely choose between them.";
+            : (res.group_key === "food"
+              ? name + " is " + an(res.competitor_category) + " \u2014 different food from " + an(business) +
+                ". You'll only compete on broad questions, so treat it as a partial competitor."
+              : name + " is " + an(res.competitor_category) + " \u2014 a different specialty from " + business +
+                ". Customers rarely choose between them.");
           var btn = document.createElement("button");
           btn.type = "button";
           btn.textContent = "Remove";
@@ -174,6 +179,10 @@
         }, statusEl);
       }, 350);
       linkEl.addEventListener("input", go);
+      // Enter in the link box reads the link -- it must not submit the form.
+      linkEl.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); lastUrl = ""; go(); }
+      });
       linkEl.addEventListener("paste", function () { setTimeout(go, 0); });
     });
 

@@ -139,8 +139,12 @@ def derive_insights(report: dict, location: str = "") -> dict:
     leader = competitors[0] if competitors else None
 
     # ---- what the assistants actually said ----
+    # Only real answers are quoted: sample (demo) answers use stock phrases,
+    # and quoting them back as "what assistants say" -- or building advice
+    # on them -- would present made-up praise as evidence.
+    real_results = [r for r in ok_results if not r.get("is_demo")]
     you_quotes, seen_q = [], set()
-    for r in ok_results:
+    for r in real_results:
         snip = (r.get("business_snippet") or "").strip()
         if r.get("mentioned") and snip and snip.lower() not in seen_q and len(you_quotes) < 3:
             seen_q.add(snip.lower())
@@ -148,7 +152,7 @@ def derive_insights(report: dict, location: str = "") -> dict:
     competitor_quotes = []
     for name, count in competitors[:3]:
         quotes, seen_c = [], set()
-        for r in ok_results:
+        for r in real_results:
             for d in r.get("item_details") or []:
                 det = (d.get("detail") or "").strip()
                 if det and len(det) > 8 and not d.get("is_you") and names_match(d.get("name", ""), name) \
@@ -403,6 +407,7 @@ def derive_insights(report: dict, location: str = "") -> dict:
         "profiles_status": profiles.get("reason") if profiles and not profiles.get("available") else None,
         "live_search_engines": sorted({r["provider"] for r in ok_results if r.get("live_search")}),
         "competitor_flags": report.get("competitor_flags") or [],
+        "category_note": report.get("category_note"),
         "playbook_label": label,
         "playbook": playbook,
         "all_demo": bool(results) and all(r.get("is_demo") for r in results),

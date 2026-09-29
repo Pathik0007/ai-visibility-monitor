@@ -87,13 +87,16 @@ def check_business_and_alert(business: Business) -> CheckRun:
 
     from category_match import screen_competitors
     tracked, flags = screen_competitors(business.category, business.competitor_list(), business.competitor_meta_dict())
+    from categories import refine_category as _refine
     report = run_visibility_check(
-        business.name, business.category, business.location, tracked,
+        business.name, _refine(business.name, business.category)[0], business.location, tracked,
         num_queries=plan["questions"],
         extra_queries=business.custom_question_list()[: plan["custom_questions"]],
         profile_benchmark=plan["profile_benchmark"],
     )
     report["competitor_flags"] = flags
+    from categories import refine_category
+    report["category_note"] = refine_category(business.name, business.category)[1]
     run = CheckRun.from_report(business.id, report)
     db.session.add(run)
     db.session.commit()

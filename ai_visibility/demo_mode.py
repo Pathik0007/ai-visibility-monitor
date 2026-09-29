@@ -9,14 +9,18 @@ never presented as if it came from a real ChatGPT/Perplexity/Gemini call.
 from __future__ import annotations
 import random
 
-REASON_PHRASES = [
-    "known for great reviews",
-    "highly rated for customer service",
-    "convenient location and opening hours",
-    "competitive pricing",
-    "fast response times",
-    "strong reputation in the area",
-]
+# Reasons that fit the kind of business -- "fast response times" for a
+# fish and chip shop made sample reports read as nonsense.
+REASONS = {
+    "food": ["generous portions", "great value for money", "friendly staff", "quick takeaway service",
+             "consistently good reviews", "popular with locals", "fresh ingredients", "open late"],
+    "health": ["gentle, thorough care", "easy online booking", "short wait times", "bulk-billing options",
+               "highly rated by patients", "modern facilities"],
+    "trades": ["fast call-outs", "upfront quotes", "licensed and insured", "tidy, reliable work",
+               "same-day availability", "strong local reviews"],
+    "default": ["well reviewed locally", "friendly service", "convenient location", "good value",
+                "responsive to enquiries", "long-standing local business"],
+}
 
 SAMPLE_RIVALS = ["Sample Rival A", "Sample Rival B", "Sample Rival C"]
 
@@ -31,26 +35,28 @@ INTROS = [
 def generate_mock_answer(query: str, business: str, category: str, location: str,
                           competitors: list[str], seed: int) -> str:
     """Deterministic-ish per (business, provider, query) so results feel stable
-    across a run, but vary across different queries/providers."""
-    rng = random.Random(seed)
-    # With no competitors typed in, the pool used to be just [business] --
-    # so every simulated answer named it at #1 and every demo report showed
-    # a fake 100%. Clearly-labelled placeholder rivals keep the sample
-    # realistic without inventing plausible-looking real business names.
-    rivals = list(competitors) or SAMPLE_RIVALS
-    pool = [business] + rivals
-    rng.shuffle(pool)
+    across a run, but vary across different queries/providers.
 
-    # Sometimes the business doesn't make the shortlist at all.
-    if rng.random() < 0.4 and business in pool and len(pool) > 1:
-        pool.remove(business)
+    Every candidate -- the business and each rival -- independently has a
+    fair chance of being listed, so no single name appears in every answer
+    (a lone typed competitor used to show up in 30 of 30 sample answers).
+    Clearly-labelled "Sample Rival" placeholders pad a short list; real
+    business names are never invented."""
+    from .query_generator import category_kind, question_category
+    rng = random.Random(seed)
+    reasons = REASONS.get(category_kind(question_category(category)), REASONS["default"])
+
+    rivals = list(competitors)[:6]
+    rivals += SAMPLE_RIVALS[: max(0, 3 - len(rivals))]
+    listed = [r for r in rivals if rng.random() < 0.6]
+    if rng.random() < 0.55:
+        listed.append(business)
+    while len(listed) < 2:
+        extra = rng.choice([r for r in rivals if r not in listed] or rivals)
+        listed.append(extra)
+    rng.shuffle(listed)
 
     lines = [rng.choice(INTROS).format(location=location)]
-    shortlist = pool[: rng.randint(2, 4)] if len(pool) > 2 else pool
-    if business in pool and business not in shortlist and rng.random() < 0.5:
-        shortlist[-1] = business  # keep the business's odds of appearing realistic
-    for i, name in enumerate(shortlist, start=1):
-        reason = rng.choice(REASON_PHRASES)
-        lines.append(f"{i}. {name} - {reason}.")
-
+    for i, name in enumerate(listed[:4], start=1):
+        lines.append(f"{i}. {name} - {rng.choice(reasons)}.")
     return "\n".join(lines)

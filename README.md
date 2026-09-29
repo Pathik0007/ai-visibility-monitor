@@ -490,6 +490,33 @@ returned an auto shop in Aruba):
     makes the same call. They're stored per monitored business and applied
     on every scheduled re-check.
 
+**Ninth pass** (from reviewing a real sample report for The Burger Boys):
+
+- **Sample reports no longer present made-up evidence.** "What the
+  assistants say" and praise-based advice only use real answers. On a
+  sample report the action list is labelled "example".
+- **Sample answers are realistic.** Reasons now fit the business type (no
+  more "fast response times" for a fish and chip shop), and every name has
+  a fair chance of being listed. A single typed competitor used to appear
+  in 30 of 30 answers.
+- **Broad categories are narrowed from the name.** "restaurant" + "The
+  Burger Boys" is checked as "burger restaurant"; "salon" + "Lux Nails" as
+  "nail salon". The report says so. This applies to free checks,
+  monitored businesses and competitor comparisons, and never overrides a
+  specific category the user chose.
+- **Different food counts as partial competition.** Burger vs fish and
+  chips gets a soft "partial competitor" note; cafe and bakery count as the
+  same thing.
+- **Name-only guesses never remove a competitor.** A competitor typed
+  without a known category gets a "possible mismatch" hint only; it is
+  never excluded.
+- **Fixes:**
+  - Enter in the Google Maps link box no longer submits the form.
+  - A link that reaches the server inside the name or competitor fields is
+    resolved there (unreadable links are dropped rather than tracked as a
+    business name).
+  - Live warnings use the refined category.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

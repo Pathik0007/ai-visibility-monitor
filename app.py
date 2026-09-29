@@ -153,6 +153,26 @@ def parse_and_validate_business_fields(form) -> dict:
     location = form.get("location", "").strip()
     competitors_raw = [c.strip() for c in form.get("competitors", "").split(",") if c.strip()]
 
+    # A Google Maps link typed/pasted into a name box (without the page's
+    # script catching it) -- resolve it here rather than checking a URL.
+    from links import looks_like_link, resolve_link
+    if looks_like_link(business):
+        found = resolve_link(business)
+        if not found.get("ok"):
+            raise ValidationError(found.get("error") or "Couldn't read that Google Maps link.")
+        business = found["name"]
+        category = category or found.get("category", "")
+        location = location or found.get("location", "")
+    resolved = []
+    for c in competitors_raw:
+        if looks_like_link(c):
+            found = resolve_link(c)
+            if found.get("ok"):
+                resolved.append(found["name"])
+            continue  # an unreadable link is dropped rather than tracked as a "name"
+        resolved.append(c)
+    competitors_raw = resolved
+
     if not business or not category or not location:
         raise ValidationError("Business name, category and location are all required.")
     for field_name, value in [("business name", business), ("category", category), ("location", location)]:
@@ -165,12 +185,14 @@ def parse_and_validate_business_fields(form) -> dict:
             raise ValidationError(f"Competitor name too long (max {MAX_NAME_LEN} characters).")
 
     from category_match import parse_meta, screen_competitors
+    from categories import refine_category
+    category, category_note = refine_category(business, category)
     meta = parse_meta(form.get("competitor_meta", ""))
     tracked, flagged = screen_competitors(category, competitors_raw, meta)
     return {
         "business": business, "category": category,
         "location": location, "competitors": competitors_raw,
-        "tracked_competitors": tracked, "competitor_flags": flagged,
+        "tracked_competitors": tracked, "competitor_flags": flagged, "category_note": category_note,
         "competitor_meta": {k: v for k, v in meta.items() if k in competitors_raw},
     }
 
@@ -382,9 +404,21 @@ def api_resolve_link():
 def api_category_check():
     """Is each competitor category the same kind of business as ours?"""
     from category_match import compare
+    from categories import refine_category
     business = request.args.get("business", "")[:100]
+    business_name = request.args.get("name", "")[:200]
+    if business_name:
+        business = refine_category(business_name, business)[0]
     cats = [c[:100] for c in request.args.getlist("c")[:20]]
-    return {"results": [compare(business, c) for c in cats]}
+    names = [n[:200] for n in request.args.getlist("n")[:20]]
+    out = []
+    for i, c in enumerate(cats):
+        if i < len(names) and names[i]:
+            c = refine_category(names[i], c)[0]
+        res = compare(business, c)
+        res["business_category"] = business  # after refinement ("restaurant" -> "burger restaurant")
+        out.append(res)
+    return {"results": out}
 
 
 @app.route("/api/categories")
@@ -431,6 +465,7 @@ def check():
         num_queries=num_queries,
     )
     report["competitor_flags"] = fields["competitor_flags"]
+    report["category_note"] = fields["category_note"]
     # Post/redirect/get: the report lives at its own shareable, refresh-safe
     # URL instead of being rendered straight from this POST handler (which
     # made refreshing the page re-run -- and re-bill -- the whole check).

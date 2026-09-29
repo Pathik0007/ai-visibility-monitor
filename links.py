@@ -205,26 +205,8 @@ def _osm_reverse(lat: float, lon: float) -> dict | None:
 
 
 def _guess_category(name: str) -> str:
-    """Category from the name itself ("Sparkle Car Wash" -> "car wash")."""
-    from categories import CATEGORIES
-    low = " " + re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower()) + " "
-    best = ""
-    for c in CATEGORIES:
-        if f" {c} " in low and len(c) > len(best):
-            best = c
-    if best:
-        return best
-    for word, cat in (("cafe", "cafe"), ("coffee", "cafe"), ("dental", "dentist"), ("pizza", "pizza restaurant"),
-                      ("sushi", "sushi restaurant"), ("seafood", "seafood restaurant"), ("fish", "fish and chips shop"),
-                      ("barber", "barber shop"), ("hair", "hair salon"), ("nails", "nail salon"), ("plumb", "plumber"),
-                      ("electric", "electrician"), ("physio", "physiotherapist"), ("vet", "veterinarian"),
-                      ("wash", "car wash"), ("auto", "car repair shop"), ("motor", "car repair shop"),
-                      ("bakery", "bakery"), ("kebab", "kebab shop"), ("burger", "burger restaurant"),
-                      ("thai", "thai restaurant"), ("gym", "gym"), ("tutor", "tutoring service"),
-                      ("school", "school"), ("clinic", "medical centre"), ("pharmacy", "pharmacy")):
-        if re.search(r"\b" + word, low):
-            return cat
-    return ""
+    from categories import guess_from_name
+    return guess_from_name(name)
 
 
 def _free_lookup(info: dict) -> dict:
