@@ -77,7 +77,7 @@
         <form method="POST" action="{{ url_for('edit_business', business_id=business.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label for="location">Location</label>
-          <input id="location" name="location" required maxlength="200" value="{{ business.location }}">
+          <input id="location" name="location" required maxlength="200" value="{{ business.location }}" autocomplete="off" data-autocomplete-location-field="1">
           <label for="category">Category</label>
           <input id="category" name="category" required maxlength="200" value="{{ business.category }}" data-autocomplete-categories="1">
           <label for="competitors">Competitors (comma-separated{% if plan %}, up to {{ plan.competitors }}{% endif %})</label>

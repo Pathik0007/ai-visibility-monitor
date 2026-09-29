@@ -336,7 +336,8 @@ a.back:hover { color: var(--accent); text-decoration: none; }
   max-height: 280px; overflow-y: auto;
 }
 .ac-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; }
-.ac-item-name { font-size: 0.92rem; color: var(--text); font-weight: 500; }
+.ac-item-name { font-size: 0.92rem; color: var(--text); font-weight: 400; }
+.ac-item-name strong { font-weight: 700; }
 .ac-item-sub { font-size: 0.76rem; color: var(--muted-dim); margin-top: 2px; }
 .ac-item-active, .ac-item:hover { background: var(--card-hover); }
 .ac-attrib { padding: 6px 12px 2px; font-size: 0.7rem; color: var(--muted-dim); text-align: right; cursor: default; }

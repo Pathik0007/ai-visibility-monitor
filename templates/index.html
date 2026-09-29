@@ -71,7 +71,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW">
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW" autocomplete="off" data-autocomplete-location-field="1">
       <p class="hint">Your suburb (e.g. North Ryde, NSW) — that's how customers ask, and it focuses the business search below on your area.</p>
 
       <label for="business">Business name</label>

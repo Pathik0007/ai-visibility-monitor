@@ -341,20 +341,70 @@ yoga studio
 """.strip().splitlines()))
 
 
+# What people type -> the categories they mean (search engines call this
+# query expansion). Keys are matched as words/prefixes.
+SYNONYMS: dict[str, list[str]] = {
+    "doctor": ["general practitioner", "medical centre"], "gp": ["general practitioner", "medical centre"],
+    "mechanic": ["mechanic", "car repair shop", "mobile mechanic"], "car service": ["car repair shop", "mechanic"],
+    "hairdresser": ["hair salon", "barber shop"], "haircut": ["barber shop", "hair salon"],
+    "chemist": ["pharmacy", "chemist"], "vet": ["veterinarian", "animal hospital"],
+    "chicken": ["chicken restaurant", "fast food restaurant"], "fish": ["fish and chips shop", "seafood restaurant", "fish market"],
+    "chips": ["fish and chips shop"], "takeaway": ["takeaway restaurant", "fast food restaurant"],
+    "lawyer": ["lawyer", "solicitor", "family lawyer"], "attorney": ["lawyer"], "physio": ["physiotherapist"],
+    "chiro": ["chiropractor"], "dental": ["dentist", "dental clinic"], "teeth": ["dentist"],
+    "nails": ["nail salon"], "lashes": ["beauty salon", "eyebrow studio"], "brows": ["eyebrow studio"],
+    "tutor": ["tutoring service"], "tuition": ["tutoring service"], "childcare": ["child care centre", "early learning centre"],
+    "daycare": ["child care centre"], "kinder": ["preschool", "early learning centre"],
+    "phone repair": ["cell phone store", "computer repair service"], "phone": ["cell phone store"],
+    "laptop": ["computer repair service", "computer store"], "aircon": ["air conditioning contractor"],
+    "ac": ["air conditioning contractor"], "sparky": ["electrician"], "tradie": ["handyman", "builder"],
+    "removals": ["removalist", "moving company"], "real estate": ["real estate agency"], "agent": ["real estate agency"],
+    "accountant": ["accounting firm", "tax agent", "bookkeeper"], "tax": ["tax agent"],
+    "gym": ["gym", "fitness studio"], "fitness": ["gym", "fitness studio", "pilates studio", "yoga studio"],
+    "coffee": ["cafe", "coffee shop"], "brunch": ["brunch restaurant", "cafe"], "pizza": ["pizza restaurant"],
+    "burger": ["burger restaurant"], "sushi": ["sushi restaurant", "japanese restaurant"],
+    "bottle-o": ["bottle shop"], "liquor": ["liquor store", "bottle shop"], "grocer": ["grocery store"],
+    "tyres": ["tyre shop"], "tires": ["tire shop"], "photographer": ["photographer", "wedding photographer"],
+}
+
+
+def _typo_match(q: str, c: str) -> bool:
+    try:
+        from search_engine import coverage, tokens
+    except Exception:
+        return False
+    qt = tokens(q, keep_stopwords=True)
+    return bool(qt) and coverage(qt, tokens(c, keep_stopwords=True)) >= 1.0
+
+
 def search_categories(query: str, limit: int = 8) -> list[str]:
-    """Ranked: exact match, then starts-with, then any word starting with
-    the query, then plain substring."""
-    q = (query or "").strip().lower()
+    """Ranked like a search box: exact, starts-with, a word starts-with,
+    synonyms ("doctor" -> "general practitioner"), then typo-tolerant
+    matches ("resturant" -> "restaurant"), then plain substring."""
+    q = " ".join((query or "").strip().lower().split())
     if len(q) < 2 or len(q) > 100:
         return []
-    exact, prefix, word_prefix, contains = [], [], [], []
+    exact, prefix, word_prefix, contains, typo = [], [], [], [], []
     for c in CATEGORIES:
         if c == q:
             exact.append(c)
         elif c.startswith(q):
             prefix.append(c)
-        elif any(w.startswith(q) for w in c.split()):
+        elif any(w.startswith(q) for w in c.split()) or (" " in q and all(any(w.startswith(p) for w in c.split()) for p in q.split())):
             word_prefix.append(c)
         elif q in c:
             contains.append(c)
-    return (exact + prefix + word_prefix + contains)[:limit]
+        elif len(q) >= 4 and _typo_match(q, c):
+            typo.append(c)
+    synonyms = []
+    for key, cats in SYNONYMS.items():
+        if key == q or (len(q) >= 3 and key.startswith(q)) or q.startswith(key + " ") or f" {key}" in f" {q}":
+            synonyms += cats
+    typo.sort(key=len)  # "restaurant" before "asian restaurant"
+    ordered = exact + prefix + word_prefix + synonyms + typo + contains
+    out, seen = [], set()
+    for c in ordered:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out[:limit]

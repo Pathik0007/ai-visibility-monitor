@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 4  # seconds -- this backs an as-you-type UI, never worth a long wait
 MAX_QUERY_LEN = 100
-DEFAULT_LIMIT = 5
+DEFAULT_LIMIT = 6
 
 # Small in-memory cache so identical queries typed by many users (or by the
 # same user re-focusing the field) don't re-hit the external API every time,
@@ -139,98 +139,158 @@ def _format_photon_address(props: dict) -> str:
 _PHOTON_NON_BUSINESS_KEYS = {"place", "highway", "boundary", "landuse", "natural", "waterway", "railway"}
 
 
+# Photon ranks by a blend of text match, prominence and distance.
+# `location_bias_scale` is how much *prominence* still counts (0..1, default
+# 0.4): the old value of 1.0 meant the location bias barely mattered, which
+# is why famous places on other continents kept outranking the one down the
+# road. 0.1 makes distance dominate; zoom 12 ~ a metro-area radius.
+_PHOTON_URL = "https://photon.komoot.io/api/"
+_BIAS_SCALE = 0.1
+_BIAS_ZOOM = 12
+
+
+def _photon(params: dict, purpose: str) -> list[dict]:
+    resp = requests.get(_PHOTON_URL, params=params, timeout=REQUEST_TIMEOUT,
+                        headers={"User-Agent": f"AI-Visibility-Monitor/1.0 ({purpose})"})
+    resp.raise_for_status()
+    return resp.json().get("features", []) or []
+
+
+def _feature_to_result(feature: dict) -> dict | None:
+    props = feature.get("properties") or {}
+    name = props.get("name")
+    if not name:
+        return None
+    coords = (feature.get("geometry") or {}).get("coordinates") or [None, None]
+    return {
+        "name": name,
+        "category": _map_osm_props_category(props),
+        "location": _format_photon_location(props),
+        "full_address": _format_photon_address(props),
+        "source": "osm",
+        "lat": coords[1], "lon": coords[0],
+        "_osm_key": props.get("osm_key"),
+        "_country": (props.get("countrycode") or "").upper(),
+    }
+
+
 def _search_photon(query: str, limit: int, lat: float | None = None, lon: float | None = None) -> list[dict]:
-    params = {"q": query, "limit": limit + 3, "lang": "en"}  # over-fetch: some get filtered below
+    """Raw business-candidate lookup (ranking happens in search_engine.py)."""
+    params = {"q": query, "limit": max(limit, 15), "lang": "en"}
     if lat is not None and lon is not None:
-        # Biases (doesn't strictly filter) results toward this point -- without
-        # it, Photon ranks purely on text-match fuzziness with no geography at
-        # all, so a query like "nene chicken" can rank a Singapore or Toronto
-        # branch above the one actually near the location the user typed.
-        params["lat"] = lat
-        params["lon"] = lon
-        params["location_bias_scale"] = 1.0
-    resp = requests.get(
-        "https://photon.komoot.io/api/",
-        params=params,
-        headers={"User-Agent": "AI-Visibility-Monitor/1.0 (business-name autocomplete)"},
-        timeout=REQUEST_TIMEOUT,
-    )
-    resp.raise_for_status()
-    results = []
-    for feature in resp.json().get("features", []):
-        props = feature.get("properties") or {}
-        name = props.get("name")
-        if not name:
-            continue  # a bare street/postcode match with no place name isn't a useful suggestion here
-        if props.get("osm_key") in _PHOTON_NON_BUSINESS_KEYS:
+        params.update(lat=lat, lon=lon, location_bias_scale=_BIAS_SCALE, zoom=_BIAS_ZOOM)
+    out = []
+    for f in _photon(params, "business-name autocomplete"):
+        r = _feature_to_result(f)
+        if r and r["_osm_key"] not in _PHOTON_NON_BUSINESS_KEYS:
+            out.append(r)
+    return out
+
+
+def _photon_places(query: str, limit: int = 8, lat: float | None = None, lon: float | None = None) -> list[dict]:
+    """Suburbs/towns/cities only (osm key "place") -- for the Location field
+    and for recognising a place name typed inside a business search."""
+    params = {"q": query, "limit": limit, "lang": "en", "osm_tag": "place"}
+    if lat is not None and lon is not None:
+        params.update(lat=lat, lon=lon, location_bias_scale=0.3, zoom=6)
+    out = []
+    for f in _photon(params, "location autocomplete"):
+        props = f.get("properties") or {}
+        coords = (f.get("geometry") or {}).get("coordinates") or [None, None]
+        if not props.get("name") or props.get("osm_value") in ("house", "isolated_dwelling", "farm", "plot"):
             continue
-        results.append({
-            "name": name,
-            "category": _map_osm_props_category(props),
-            "location": _format_photon_location(props),
-            "full_address": _format_photon_address(props),
-            "source": "osm",
+        state = props.get("state") or ""
+        country = props.get("country") or ""
+        parent = props.get("city") if props.get("city") and props.get("city") != props["name"] else ""
+        value = ", ".join(p for p in (props["name"], _short_state(state, props.get("countrycode"))) if p)
+        out.append({
+            "name": props["name"], "value": value,
+            "full_address": ", ".join(p for p in (parent, state, country) if p),
+            "lat": coords[1], "lon": coords[0],
+            "country": (props.get("countrycode") or "").upper() or None,
+            "kind": props.get("osm_value", ""), "source": "osm",
         })
-        if len(results) >= limit:
-            break
-    return results
+    return out
 
 
-def _geocode_photon(location_text: str) -> dict | None:
-    resp = requests.get(
-        "https://photon.komoot.io/api/",
-        params={"q": location_text, "limit": 1, "lang": "en"},
-        headers={"User-Agent": "AI-Visibility-Monitor/1.0 (location geocoding)"},
-        timeout=REQUEST_TIMEOUT,
-    )
-    resp.raise_for_status()
-    features = resp.json().get("features", [])
+_AU_STATES = {"new south wales": "NSW", "victoria": "VIC", "queensland": "QLD", "western australia": "WA",
+              "south australia": "SA", "tasmania": "TAS", "australian capital territory": "ACT",
+              "northern territory": "NT"}
+_US_STATES = {"california": "CA", "new york": "NY", "texas": "TX", "florida": "FL", "washington": "WA",
+              "illinois": "IL", "massachusetts": "MA", "new jersey": "NJ", "georgia": "GA", "colorado": "CO",
+              "arizona": "AZ", "oregon": "OR", "pennsylvania": "PA", "ohio": "OH", "michigan": "MI",
+              "north carolina": "NC", "virginia": "VA", "nevada": "NV", "minnesota": "MN", "tennessee": "TN"}
+
+
+def _short_state(state: str, countrycode: str | None) -> str:
+    cc = (countrycode or "").upper()
+    table = _AU_STATES if cc == "AU" else _US_STATES if cc == "US" else {}
+    return table.get((state or "").lower(), state or "")
+
+
+def _geocode_photon(location_text: str, lat: float | None = None, lon: float | None = None) -> dict | None:
+    params = {"q": location_text, "limit": 1, "lang": "en"}
+    if lat is not None and lon is not None:
+        params.update(lat=lat, lon=lon, location_bias_scale=0.3, zoom=6)
+    features = _photon(params, "location geocoding")
     if not features:
         return None
     coords = (features[0].get("geometry") or {}).get("coordinates")
     if not coords or len(coords) < 2:
         return None
-    lon, lat = coords[0], coords[1]  # GeoJSON order is [lon, lat]
+    lon_, lat_ = coords[0], coords[1]  # GeoJSON order is [lon, lat]
     props = features[0].get("properties") or {}
     # Also where it is -- used to localise the AI assistants' own web
     # searches (country/city) and to keep business suggestions in-country.
     place_name = props.get("name") if props.get("osm_key") == "place" else None
     return {
-        "lat": lat, "lon": lon,
+        "lat": lat_, "lon": lon_,
         "country": (props.get("countrycode") or "").upper() or None,
         "city": place_name or props.get("city") or props.get("district") or None,
         "region": props.get("state") or None,
+        "name": props.get("name") or None,
+        "kind": f"{props.get('osm_key')}:{props.get('osm_value')}",
     }
 
 
-def geocode_location(location_text: str) -> dict | None:
-    """Best-effort: turn free-text like "Parramatta, Sydney" into a
-    lat/lon so the business-name search below can be biased toward it.
-    Never raises -- a failure here should just mean an unbiased (global)
-    name search, not a broken page.
-
-    Always Photon: it geocodes suburbs/cities well, it's free, and it means a
-    Google key only needs "Places API (New)" enabled -- not the separate
-    Geocoding API as well (a key without it used to fail every geocode
-    first, adding a wasted round-trip to every keystroke in Location)."""
+def geocode_location(location_text: str, lat: float | None = None, lon: float | None = None) -> dict | None:
+    """Best-effort: turn free-text like "North Ryde, NSW" into lat/lon +
+    country/city/region. Never raises. Always Photon (free), so a Google key
+    only needs Places API (New), not the separate Geocoding API.
+    `lat`/`lon` (optional) nudge ambiguous names ("Macquarie") toward the
+    user's own region."""
     location_text = (location_text or "").strip()
     if len(location_text) < 3 or len(location_text) > MAX_QUERY_LEN:
         return None
 
-    cache_key = f"geocode|{location_text.lower()}"
+    near = f"{round(lat)},{round(lon)}" if lat is not None and lon is not None else "-"
+    cache_key = f"geocode|{location_text.lower()}|{near}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached or None  # cached `{}` means "looked up, found nothing"
 
     try:
-        result = _geocode_photon(location_text)
+        result = _geocode_photon(location_text, lat, lon)
     except Exception as exc:
         logger.warning("Photon geocoding failed: %s", exc)
         return None  # never cache a failure -- retry on the next keystroke
 
-    # A genuine "nothing there" answer is cached (as {}) like a hit.
     _cache_set(cache_key, result or {})
     return result
+
+
+_TZ_RE = re.compile(r"^[A-Za-z]+(?:/[A-Za-z0-9_+\-]+){1,2}$")
+
+
+def region_from_timezone(tz: str | None) -> dict | None:
+    """The browser's time zone ("Australia/Sydney") is a free, permission-less
+    hint about where the user is -- used to rank nearby results first when
+    the Location field is still empty (search engines do the same with IP
+    location). Never raises."""
+    if not tz or not _TZ_RE.match(tz) or tz.startswith("Etc/"):
+        return None
+    city = tz.split("/")[-1].replace("_", " ")
+    return geocode_location(city)
 
 
 # ---------- Google Places API (New) ----------
@@ -349,6 +409,40 @@ def _search_google(query: str, api_key: str, limit: int, lat: float | None = Non
     return results
 
 
+def google_regions(query: str, api_key: str, bias: dict | None = None, session: str | None = None,
+                   limit: int = 6) -> list[dict]:
+    """Suburbs/cities for the Location field, via Autocomplete (New) limited
+    to "(regions)"."""
+    body: dict = {"input": query, "includedPrimaryTypes": ["(regions)"]}
+    if bias and bias.get("lat") is not None:
+        body["locationBias"] = {"circle": {"center": {"latitude": bias["lat"], "longitude": bias["lon"]},
+                                           "radius": 50000.0}}
+    if bias and bias.get("country"):
+        body["includedRegionCodes"] = [bias["country"].lower()]
+    if session:
+        body["sessionToken"] = session
+    resp = requests.post(_GOOGLE_AUTOCOMPLETE_URL, json=body, timeout=REQUEST_TIMEOUT,
+                         headers={"X-Goog-Api-Key": api_key, "Content-Type": "application/json"})
+    if resp.status_code != 200:
+        _record_google_error(f"Autocomplete (regions): {_google_error(resp)}")
+        raise RuntimeError(_google_error(resp))
+    out = []
+    for sug in resp.json().get("suggestions", []):
+        pred = sug.get("placePrediction")
+        if not pred:
+            continue
+        sf = pred.get("structuredFormat") or {}
+        main = (sf.get("mainText") or {}).get("text") or ""
+        secondary = (sf.get("secondaryText") or {}).get("text") or ""
+        parts = [x.strip() for x in secondary.split(",") if x.strip()]
+        state = parts[0] if len(parts) >= 2 else ""
+        out.append({"name": main, "value": ", ".join(p for p in (main, state) if p),
+                    "full_address": secondary, "source": "google"})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def place_details(place_id: str, session: str | None = None) -> dict | None:
     """Called once when someone picks a Google suggestion: exact suburb/city
     and category for the autofill. Passing the same session token as the
@@ -403,48 +497,18 @@ _REGION_RE = re.compile(r"^[A-Za-z]{2}$")
 
 def search_places(query: str, limit: int = DEFAULT_LIMIT,
                    lat: float | None = None, lon: float | None = None,
-                   session: str | None = None, region: str | None = None) -> list[dict]:
-    """Look up business-name suggestions. Never raises -- worst case is [].
-
-    `lat`/`lon`, when given, bias results toward that point -- pass the
-    geocoded coordinates of whatever the user has already typed into the
-    Location field so "nene chicken" ranks the branch actually near them
-    above unrelated branches on the other side of the world.
-
-    Google results are never cached here: Google's terms only allow caching
-    place IDs, and each keystroke is already covered by the session token.
-    Only the free OSM path uses the short in-memory cache."""
-    query = (query or "").strip()
-    if len(query) < 3 or len(query) > MAX_QUERY_LEN:
-        return []
-
-    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
-    if api_key:
-        try:
-            region = region if region and _REGION_RE.match(region) else None
-            results = _search_google(query, api_key, limit, lat=lat, lon=lon, session=session, region=region)
-            if results:
-                return results
-            # Zero Google matches: fall through to OSM -- occasionally it has
-            # a small place Google doesn't, and it costs nothing to ask.
-        except Exception as exc:
-            logger.warning("Google Places autocomplete failed, falling back: %s", exc)
-
-    bias_key = f"{round(lat, 2)},{round(lon, 2)}" if lat is not None and lon is not None else "nobias"
-    cache_key = f"{query.lower()}|{limit}|{bias_key}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
-
+                   session: str | None = None, region: str | None = None,
+                   tz: str | None = None) -> list[dict]:
+    """Business suggestions. Never raises -- worst case is []. The ranking
+    logic (query splitting, re-ranking, proximity) lives in search_engine."""
+    import search_engine
+    region = region if region and _REGION_RE.match(region) else None
     try:
-        results = _search_photon(query, limit, lat=lat, lon=lon)
+        return search_engine.search_businesses(query, lat=lat, lon=lon, region=region, session=session,
+                                               tz=tz, limit=limit)
     except Exception as exc:
-        logger.warning("Photon autocomplete failed: %s", exc)
-        return []  # a failed lookup is never cached -- retry on the next keystroke
-
-    # A completed lookup -- including a genuine zero-result answer -- is cached.
-    _cache_set(cache_key, results)
-    return results
+        logger.warning("Business search failed: %s", exc)
+        return []
 
 
 # ---------- Google profile benchmark (Places API (New) Text Search) ----------

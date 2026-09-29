@@ -427,6 +427,39 @@ related bugs alongside it):
 - **Wasted API call removed** -- an optional Claude "extra questions" call
   ran on every check, but its output was always discarded.
 
+**Seventh pass** (search suggestions -- "nene chicken macquarie center"
+returned an auto shop in Aruba):
+
+- **Root causes**:
+  - Photon's `location_bias_scale` was 1.0, which means *maximum prominence,
+    minimum location bias* (the opposite of the intent).
+  - Raw provider results were shown unfiltered, so a result matching one
+    word ("center") got through.
+  - A place typed inside the business query was treated as part of the
+    business name.
+- **New `search_engine.py`**, modelled on how map search engines handle
+  typeahead:
+  - query understanding: trailing words that geocode to a real place near
+    the user become the search centre;
+  - multi-angle candidate generation: the full query plus the name near the
+    detected place, merged and de-duplicated;
+  - re-ranking: typo-tolerant name relevance, proximity, same-country;
+  - junk filter: a result's name must contain the typed name (fully for 1-2
+    words, 2/3 for longer names);
+  - overseas namesakes are dropped when local matches exist;
+  - Google results are filtered by the same rule.
+- **No Location typed yet?** The browser's time zone (e.g. Australia/Sydney)
+  is used as a permission-free "near me" hint, the stand-in search engines
+  use for IP location.
+- **Location field now autocompletes** suburbs/towns/cities (Google
+  "(regions)" when configured, otherwise OSM places, AU/US states
+  abbreviated). Picking one sets the search centre for Business name and
+  Competitors instantly.
+- **Category field** adds synonyms ("doctor" -> general practitioner,
+  "mechanic" -> car repair shop) and typo tolerance ("resturant").
+- **UI**: matched words are bolded, distance is shown ("Herring Road,
+  Macquarie Park - 200 m"), and a "Searching..." state appears.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

@@ -41,6 +41,13 @@
   // only triggers one /api/geocode call chain, not one per paired widget.
   var biasByLocationEl = new WeakMap();
 
+  // The browser's time zone ("Australia/Sydney") -- a permission-free hint
+  // of roughly where the user is, used server-side to rank nearby results
+  // first while the Location field is still empty.
+  var TZ = "";
+  try { TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { TZ = ""; }
+  function tzParam() { return TZ ? "&tz=" + encodeURIComponent(TZ) : ""; }
+
   function getLocationBias(locationInput) {
     if (!locationInput) return { lat: null, lon: null };
     if (biasByLocationEl.has(locationInput)) return biasByLocationEl.get(locationInput);
@@ -49,7 +56,7 @@
     var runGeocode = debounce(function (text) {
       text = text.trim();
       if (text.length < 3) { state.lat = null; state.lon = null; return; }
-      fetch("/api/geocode?q=" + encodeURIComponent(text))
+      fetch("/api/geocode?q=" + encodeURIComponent(text) + tzParam())
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           if (data && data.lat != null && data.lon != null) {
@@ -61,6 +68,10 @@
         .catch(function () { /* silent -- search just stays unbiased */ });
     }, 400);
 
+    state.refresh = runGeocode;
+    state.setExact = function (lat, lon, country) {
+      state.lat = lat; state.lon = lon; state.country = country || state.country;
+    };
     locationInput.addEventListener("input", function () { runGeocode(locationInput.value); });
     if (locationInput.value) runGeocode(locationInput.value);
 
@@ -84,7 +95,7 @@
     }
     if (bias && bias.country) url += "&region=" + encodeURIComponent(bias.country);
     if (session) url += "&session=" + encodeURIComponent(session);
-    return url;
+    return url + tzParam();
   }
 
   // Builds the wrapper + dropdown DOM and the shared open/close/navigate
@@ -126,6 +137,37 @@
     // (as opposed to "hasn't searched yet") -- shown as a plain, unselectable
     // note rather than just closing the list, so a real "not in our
     // database" answer doesn't look identical to "nothing happened."
+    // Bold the parts of each suggestion that match what was typed, the way
+    // Google/Maps suggestions do -- built with DOM nodes, never innerHTML.
+    function appendHighlighted(el, text, query) {
+      var words = (query || "").toLowerCase().split(/[^a-z0-9\u00c0-\u024f]+/).filter(function (w) { return w.length >= 2; });
+      var parts = String(text).split(/([A-Za-z0-9\u00c0-\u024f']+)/);
+      parts.forEach(function (part) {
+        if (!part) return;
+        var norm = part.toLowerCase().replace(/'/g, "");
+        var hit = words.some(function (w) { return norm.indexOf(w) === 0 || (w.length >= 5 && norm.indexOf(w) >= 0); });
+        if (hit) {
+          var b = document.createElement("strong");
+          b.textContent = part;
+          el.appendChild(b);
+        } else {
+          el.appendChild(document.createTextNode(part));
+        }
+      });
+    }
+
+    function loading() {
+      if (!list.hidden && currentResults.length) return; // keep old results visible while refreshing
+      list.innerHTML = "";
+      var li = document.createElement("li");
+      li.className = "ac-empty";
+      li.setAttribute("role", "presentation");
+      li.textContent = "Searching\u2026";
+      list.appendChild(li);
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    }
+
     function render(results, opts) {
       currentResults = results;
       activeIndex = -1;
@@ -151,12 +193,17 @@
         li.setAttribute("role", "option");
         var main = document.createElement("div");
         main.className = "ac-item-name";
-        main.textContent = r.name;
+        appendHighlighted(main, r.name, opts && opts.query);
         li.appendChild(main);
-        if (r.full_address) {
+        var subText = r.full_address || "";
+        if (r.distance_km != null) {
+          var d = r.distance_km < 1 ? Math.round(r.distance_km * 1000) + " m" : r.distance_km.toFixed(r.distance_km < 10 ? 1 : 0) + " km";
+          subText = subText ? subText + " \u00b7 " + d : d;
+        }
+        if (subText) {
           var sub = document.createElement("div");
           sub.className = "ac-item-sub";
-          sub.textContent = r.full_address;
+          sub.textContent = subText;
           li.appendChild(sub);
         }
         li.addEventListener("mousedown", function (e) {
@@ -212,7 +259,7 @@
       setTimeout(close, 100); // allow a pending mousedown selection to land first
     });
 
-    return { render: render, close: close };
+    return { render: render, close: close, loading: loading };
   }
 
   function attachPlaceAutocomplete(nameId, categoryId, locationId) {
@@ -255,11 +302,12 @@
     var requestSeq = 0;
     var runSearch = debounce(function (query) {
       var seq = ++requestSeq;
+      widget.loading();
       fetch(placesUrl(query, bias, session))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
         .then(function (data) {
           if (seq !== requestSeq) return; // a newer search has since started
-          widget.render((data && data.results) || [], { searched: true });
+          widget.render((data && data.results) || [], { searched: true, query: query });
         })
         .catch(function () { /* silent -- typing still works as a plain field */ });
     }, 300);
@@ -299,11 +347,12 @@
     var requestSeq = 0;
     var runSearch = debounce(function (query) {
       var seq = ++requestSeq;
+      widget.loading();
       fetch(placesUrl(query, bias, session))
         .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
         .then(function (data) {
           if (seq !== requestSeq) return; // a newer search has since started
-          widget.render((data && data.results) || [], { searched: true });
+          widget.render((data && data.results) || [], { searched: true, query: query });
         })
         .catch(function () { /* silent -- typing still works as a plain field */ });
     }, 300);
@@ -330,7 +379,7 @@
           if (seq !== requestSeq) return;
           var names = (data && data.results) || [];
           if (!names.length) { widget.close(); return; } // any wording is fine here -- no "no matches" nag
-          widget.render(names.map(function (n) { return { name: n }; }), { searched: true });
+          widget.render(names.map(function (n) { return { name: n }; }), { searched: true, query: query });
         })
         .catch(function () {});
     }, 150);
@@ -341,6 +390,44 @@
     });
   }
 
+  // Location field: suburbs/towns/cities (/api/locations). Picking one sets
+  // the search centre for the paired business/competitor fields directly.
+  function attachLocationAutocomplete(inputId) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+    var bias = getLocationBias(input);
+    var session = newSessionToken();
+    var widget = buildWidget(input, function (result) {
+      input.value = result.value || result.name;
+      input.dataset.userTyped = "1";
+      if (result.lat != null && result.lon != null) {
+        bias.setExact(result.lat, result.lon, result.country);
+      } else if (bias.refresh) {
+        bias.refresh(input.value);
+      }
+      session = newSessionToken();
+    });
+    var requestSeq = 0;
+    var runSearch = debounce(function (query) {
+      var seq = ++requestSeq;
+      fetch("/api/locations?q=" + encodeURIComponent(query) + "&session=" + encodeURIComponent(session) + tzParam())
+        .then(function (resp) { return resp.ok ? resp.json() : { results: [] }; })
+        .then(function (data) {
+          if (seq !== requestSeq) return;
+          var rs = (data && data.results) || [];
+          if (!rs.length) { widget.close(); return; } // any place name is fine to type freely
+          widget.render(rs, { searched: true, query: query });
+        })
+        .catch(function () {});
+    }, 200);
+    input.addEventListener("input", function () {
+      var q = input.value.trim();
+      if (q.length < 2) { requestSeq++; widget.close(); return; }
+      runSearch(q);
+    });
+  }
+
+  window.attachLocationAutocomplete = attachLocationAutocomplete;
   window.attachPlaceAutocomplete = attachPlaceAutocomplete;
   window.attachCategoryAutocomplete = attachCategoryAutocomplete;
   window.attachMultiValueAutocomplete = attachMultiValueAutocomplete;
@@ -362,6 +449,11 @@
         input.getAttribute("data-autocomplete-category") || null,
         input.getAttribute("data-autocomplete-location") || null
       );
+    });
+    // Location widgets first, so the business/competitor widgets share the
+    // same bias state they create.
+    document.querySelectorAll("[data-autocomplete-location-field]").forEach(function (input) {
+      attachLocationAutocomplete(input.id);
     });
     document.querySelectorAll("[data-autocomplete-categories]").forEach(function (input) {
       attachCategoryAutocomplete(input.id);

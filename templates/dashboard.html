@@ -50,7 +50,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <h3 style="margin-top:0;">Add a business to monitor</h3>
       <label for="location">Location</label>
-      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW">
+      <input id="location" name="location" required maxlength="200" placeholder="e.g. North Ryde, NSW" autocomplete="off" data-autocomplete-location-field="1">
       <p class="field-hint">Your suburb -- that's how customers ask, and it focuses the business search below on your area.</p>
       <label for="name">Business name</label>
       <input id="name" name="name" required maxlength="200" autocomplete="off"

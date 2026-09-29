@@ -35,7 +35,7 @@ from alerts import check_business_and_alert, run_weekly_checks
 from ai_visibility.pipeline import run_visibility_check
 from ai_visibility.providers import ALL_PROVIDERS
 from ai_visibility.insights import ensure_insights
-from places import search_places, geocode_location, place_details, valid_session_token
+from places import search_places, geocode_location, place_details, valid_session_token, region_from_timezone
 from categories import search_categories
 import report_cache
 
@@ -323,8 +323,24 @@ def api_places():
     lon = request.args.get("lon", type=float)
     session = valid_session_token(request.args.get("session"))
     region = request.args.get("region")
+    tz = request.args.get("tz")
     try:
-        results = search_places(query, lat=lat, lon=lon, session=session, region=region)
+        results = search_places(query, lat=lat, lon=lon, session=session, region=region, tz=tz)
+    except Exception:
+        results = []
+    return {"results": results}
+
+
+@app.route("/api/locations")
+@limiter.limit("90 per minute")
+def api_locations():
+    """Location-field suggestions: suburbs, towns and cities, ranked toward
+    the user's own country (browser time zone) -- Google when configured."""
+    import search_engine
+    try:
+        results = search_engine.search_locations(
+            request.args.get("q", ""), tz=request.args.get("tz"),
+            session=valid_session_token(request.args.get("session")))
     except Exception:
         results = []
     return {"results": results}
@@ -358,8 +374,9 @@ def api_geocode():
     returns 200 -- {"lat": null, "lon": null} when nothing was found or the
     lookup failed -- so it never breaks the form it's supporting."""
     query = request.args.get("q", "")
+    near = region_from_timezone(request.args.get("tz"))
     try:
-        result = geocode_location(query)
+        result = geocode_location(query, (near or {}).get("lat"), (near or {}).get("lon"))
     except Exception:
         result = None
     result = result or {}
