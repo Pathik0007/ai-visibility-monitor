@@ -24,20 +24,37 @@
     <section class="steps" style="margin-top:0;">
       <div class="step">
         <div class="step-n">1</div>
-        <div><p class="step-t">Realistic questions, not your business name</p><p class="step-d">We generate the kind of question a real customer would type -- "best {category} in {location}" -- and deliberately never mention your business by name, so the score reflects whether assistants recommend you unprompted.</p></div>
+        <div><p class="step-t">The questions your customers actually ask</p><p class="step-d">Not just "best dentist in North Ryde" -- real intents for your kind of business: "emergency dentist open on weekends", "plumber available today", "how much is a check-up", "good with nervous patients". Each question is tagged with what it tests (urgency, price, a specific service, trust), and we never mention your business by name -- the score shows whether assistants recommend you unprompted.</p></div>
       </div>
       <div class="step">
         <div class="step-n">2</div>
-        <div><p class="step-t">Sent to five AI assistants in parallel</p><p class="step-d">ChatGPT, Claude, Perplexity, Gemini and DeepSeek each answer independently. Claude and Gemini are configured to use live web search where supported, closer to how a real user's question gets answered.</p></div>
+        <div><p class="step-t">Asked to five assistants, as a local customer</p><p class="step-d">ChatGPT, Claude, Perplexity and Gemini search the live web as someone in your suburb would (Gemini also uses Google Maps). DeepSeek answers from what it learned in training. We keep the pages they cite.</p></div>
       </div>
       <div class="step">
         <div class="step-n">3</div>
-        <div><p class="step-t">Answers are scored, not guessed</p><p class="step-d">Each answer is checked for whether your business is named (matching is case-insensitive, whole-word, and tolerant of curly quotes and "&" vs "and"), and, if it's in a numbered or bulleted list, where it ranks. A mention with no clear ranking is counted but never force-fit into a fake position.</p></div>
+        <div><p class="step-t">Scored, not guessed</p><p class="step-d">We check whether you're actually recommended (spelling variants like "Ace's"/"Aces" count; "I couldn't find information about X" doesn't), where you rank, who's named instead, and what the assistants say about each business.</p></div>
       </div>
       <div class="step">
         <div class="step-n">4</div>
-        <div><p class="step-t">A plan tailored to your category and your gaps</p><p class="step-d">The action plan combines category-specific playbooks (a dentist and a restaurant need different things) with notes on which specific assistant is under-performing for you and roughly why, based on how that assistant tends to source its answers.</p></div>
+        <div><p class="step-t">A plan for the three things assistants rely on</p><p class="step-d">Every step is tagged to one of them and tied to what happened in your check -- a question you were missed on, a site the assistants read that doesn't list you, a competitor with more reviews.</p></div>
       </div>
+    </section>
+
+    <section class="section-info">
+      <h2>What counts: it's not only Google</h2>
+      <p class="sub">Each assistant gets local business information from different places, so a Google Business Profile alone isn't enough:</p>
+      <ul class="fixlist">
+        <li><strong>Gemini</strong> answers local questions from Google Maps -- your Google Business Profile, reviews and photos.</li>
+        <li><strong>ChatGPT</strong> doesn't read Google Business Profiles directly. Its local answers lean on Bing (Bing Places), business websites, articles and directories.</li>
+        <li><strong>Claude and Perplexity</strong> search the live web: your website, directories, review sites and local articles.</li>
+        <li><strong>Siri and Apple Maps</strong> use Apple Business Connect.</li>
+      </ul>
+      <p class="sub" style="margin-top:14px;">So visibility rests on three things, and the report scores each:</p>
+      <ul class="fixlist">
+        <li><strong>Listings &amp; profiles</strong> -- the same name, address, phone, hours and categories on Google, Bing, Apple and the directories your industry uses (e.g. HotDoc for dentists, hipages for tradies, OpenTable for restaurants).</li>
+        <li><strong>Reviews &amp; reputation</strong> -- recent, specific reviews on the platforms your customers read. Assistants repeat specifics ("fixed our burst pipe in an hour").</li>
+        <li><strong>Website</strong> -- readable by AI search crawlers, and saying in plain text who you are, what you do, where, and when. <a href="{{ url_for('website_check') }}">Check yours free</a>.</li>
+      </ul>
     </section>
     <p class="center sub" style="margin-top:32px;">
       <a href="{{ url_for('index') }}">Run a free check</a> or see the <a href="{{ url_for('faq') }}">FAQ</a>.

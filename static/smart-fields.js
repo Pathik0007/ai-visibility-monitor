@@ -45,6 +45,7 @@
     var catEl = $(form.getAttribute("data-category"));
     var locEl = $(form.getAttribute("data-location"));
     var compEl = $(form.getAttribute("data-competitors"));
+    var webEl = form.querySelector("input[name=website]");
     var metaEl = form.querySelector("input[name=competitor_meta]");
     var meta = {};
     try { meta = JSON.parse((metaEl && metaEl.value) || "{}") || {}; } catch (e) { meta = {}; }
@@ -139,6 +140,7 @@
     function fillBusiness(d, statusEl) {
       if (nameEl) nameEl.value = d.name;
       if (catEl && d.category) catEl.value = d.category;
+      if (webEl && d.website && !webEl.value.trim()) webEl.value = d.website;
       if (locEl && d.location) {
         locEl.value = d.location;
         locEl.dataset.userTyped = "1";

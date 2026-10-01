@@ -57,6 +57,13 @@ _AUDIENCES = {
 # Keyword -> what that kind of question is really testing. Used by the report
 # to turn "you were missed on these questions" into a specific fix.
 QUESTION_THEMES = [
+    ("emergency", "urgent"),
+    ("available today", "urgent"),
+    ("same day", "urgent"),
+    ("fit me in", "urgent"),
+    ("how much", "price"),
+    ("cost", "price"),
+    ("cheap", "price"),
     ("affordable", "price"),
     ("open on weekends", "hours"),
     ("best reviews", "reviews"),
@@ -106,31 +113,29 @@ def _sentence_case(q: str) -> str:
     return q[:1].upper() + q[1:] if q else q
 
 
-def generate_queries(business: str, category: str, location: str, count: int = 8) -> list[str]:
-    # Template-based queries never mention `business` -- we're measuring
-    # whether the assistant names it *unprompted*, so a query that already
-    # says the business's name would inflate the score for a question no
-    # real customer would actually type.
+def generate_queries_with_themes(business: str, category: str, location: str, count: int = 8) -> list[tuple[str, str]]:
+    """Questions as real customers ask an assistant, each tagged with what
+    it tests (price, urgency, a specific service...). Niche questions come
+    from niches.py; generic templates fill any gap. Never mentions the
+    business itself -- we measure whether it's named unprompted."""
+    import niches
     noun = question_category(category)
+    out: list[tuple[str, str]] = []
+    for q, theme in niches.niche_questions(niches.niche_for(noun), noun, location):
+        q = _sentence_case(q)
+        if q not in [x for x, _ in out]:
+            out.append((q, theme))
     audiences = _AUDIENCES[category_kind(noun)]
-    queries = []
     i = 0
-    max_template_rounds = len(TEMPLATES) * max(1, (count // len(TEMPLATES) + 2))
-    rounds = 0
-    while len(queries) < count and rounds < max_template_rounds:
+    while len(out) < count and i < len(TEMPLATES) * 4:
         template = TEMPLATES[i % len(TEMPLATES)]
-        q = _sentence_case(template.format(
-            category=noun,
-            location=location,
-            business=business,
-            audience=audiences[(i // len(TEMPLATES)) % len(audiences)],
-        ))
-        if q not in queries:
-            queries.append(q)
+        q = _sentence_case(template.format(category=noun, location=location, business=business,
+                                           audience=audiences[(i // len(TEMPLATES)) % len(audiences)]))
+        if q not in [x for x, _ in out]:
+            out.append((q, question_theme(q)))
         i += 1
-        rounds += 1
+    return out[:count]
 
-    # (An optional Claude call used to add extra phrasings here, but the
-    # templates always fill `count` first, so its output was thrown away --
-    # a wasted paid API call on every check. Removed.)
-    return queries[:count]
+
+def generate_queries(business: str, category: str, location: str, count: int = 8) -> list[str]:
+    return [q for q, _ in generate_queries_with_themes(business, category, location, count)]

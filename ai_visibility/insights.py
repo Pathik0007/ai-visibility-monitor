@@ -15,6 +15,32 @@ from collections import OrderedDict
 from .query_generator import question_theme, question_category
 from .solutions import match_category_playbook
 from .analyzer import names_match
+import niches as _niches
+
+_PILLAR_BY_TITLE = [
+    ("Get your business onto Google Maps", "listings"), ("Fix your Google business status", "listings"),
+    ("Make your details easy to find", "website"), ("Change your Google category", "listings"),
+    ("Close the Google review gap", "reviews"), ("Lift your Google rating", "reviews"),
+    ("Add your website to your Google profile", "listings"), ("Add your opening hours on Google", "listings"),
+    ("Weekend hours", "listings"), ("Get onto the sites the assistants read", "mentions"),
+    ("Publish your prices", "website"), ("Show your opening hours", "listings"),
+    ("Make it obvious you take urgent", "listings"), ("Name the service", "website"),
+    ("Make booking", "listings"), ("Answer your own question", "website"),
+    ("Get more recent, detailed reviews", "reviews"), ("Say who you're great for", "website"),
+    ("Get into comparison", "mentions"), ("Get into local", "mentions"), ("Close the gap on", "listings"),
+    ("Get cited on well-known sites", "mentions"), ("Complete your Google Business Profile", "listings"),
+    ("Rank for the search itself", "website"), ("Be on Bing Places", "listings"), ("Hold your position", "reviews"),
+    ("Fix your website", "website"), ("Unblock AI search", "website"), ("Remove the noindex", "website"),
+    ("Be listed where", "listings"), ("Fix your website's", "website"),
+]
+
+
+def _pillar_for(title: str) -> str:
+    for prefix, pillar in _PILLAR_BY_TITLE:
+        if title.startswith(prefix):
+            return pillar
+    return "listings"
+
 
 # Assistants that mostly answer from training data vs. ones that search the
 # live web / Google's own data in a normal chat. Hedged on purpose: the
@@ -31,18 +57,32 @@ _ENGINE_FIX = {
     "Perplexity": ("Rank for the search itself",
                    "Perplexity searches the live web and cites what ranks. Add a page to your site that "
                    "targets \"{noun} in {location}\" and get it linked from local sites."),
-    "ChatGPT": ("Be findable on the open web",
-                "ChatGPT mixes training data with live search. An indexable website with your services, "
-                "suburb and contact details, plus current mentions on other sites, covers both."),
+    "ChatGPT": ("Be on Bing Places",
+                "ChatGPT's local answers lean on Bing rather than Google Business Profile. Claim and complete "
+                "Bing Places (bingplaces.com -- it can import your Google profile), and keep your website's "
+                "services, suburb and hours in plain text."),
 }
 
 _THEME_FIX = {
     "price": ("Publish your prices",
               "You were missed on “{q}”. Assistants can only call you affordable if prices are "
               "published -- add price ranges or a menu/price list to your website and Google profile."),
-    "hours": ("Show your weekend hours everywhere",
-              "You were missed on “{q}”. Add Saturday/Sunday hours to your Google profile, "
-              "website and directory listings, and keep them identical."),
+    "hours": ("Show your opening hours everywhere",
+              "You were missed on “{q}”. Put complete hours (including weekends, late nights and "
+              "holidays) on Google, Bing, Apple Maps and your website -- identical everywhere."),
+    "urgent": ("Make it obvious you take urgent jobs",
+               "You were missed on “{q}”. Say “same-day” / “emergency” / “available today” "
+               "in your Google services and business description, on your website, and keep a phone number "
+               "one tap away -- assistants only suggest businesses that say they're available."),
+    "specialty": ("Name the service you were missed for",
+                  "You were missed on “{q}”. If you offer it, give it its own page on your website and add "
+                  "it to your Google services list using the same words customers use -- assistants match exact services."),
+    "booking": ("Make booking and ordering easy",
+                "You were missed on “{q}”. Link online booking/ordering from Google and your website, and be on "
+                "the booking or delivery platforms your customers use."),
+    "custom": ("Answer your own question on your website",
+               "You were missed on your question “{q}”. Add a short page or FAQ that answers it directly, "
+               "mentioning your suburb -- that's the text assistants can quote."),
     "reviews": ("Get more recent, detailed reviews",
                 "You were missed on “{q}”. Ask recent customers for reviews that mention what "
                 "they came in for -- assistants weigh recent, specific reviews, not just the star average."),
@@ -94,7 +134,7 @@ def derive_insights(report: dict, location: str = "") -> dict:
         hits = sum(1 for c in ok if c["state"] == "hit")
         rows.append({
             "query": row["query"],
-            "theme": question_theme(row["query"]),
+            "theme": (report.get("question_themes") or {}).get(row["query"]) or question_theme(row["query"]),
             "cells": [row["cells"].get(p, {"state": "none"}) for p in providers],
             "hits": hits,
             "ok": len(ok),
@@ -344,10 +384,10 @@ def derive_insights(report: dict, location: str = "") -> dict:
         title, detail = _THEME_FIX.get(theme, _DEFAULT_THEME_FIX)
         cands.append((3, {"title": title, "detail": detail.format(q=_short_q(r["query"], 90), noun=noun, location=loc),
                           "why": f"{r['hits']}/{r['ok']} recommended you"}))
-        if len(used_themes) >= 2:
+        if len(used_themes) >= 3:
             break
 
-    if leader and leader[1] > your_mentions and not comp_p:
+    if leader and leader[1] > your_mentions and not comp_p and not leader[0].lower().startswith("sample rival"):
         name, count = leader
         praise = next((cq["quotes"][0]["text"] for cq in competitor_quotes if cq["name"] == name), None)
         detail = (f"{name} was recommended in {count} answers vs your {your_mentions}. "
@@ -380,12 +420,75 @@ def derive_insights(report: dict, location: str = "") -> dict:
                                     "details current -- rankings shift as assistants update.",
                           "why": f"{score}% visibility"}))
 
+    # ---- website (from the website check, when a site was given) ----
+    website = report.get("website")
+    if website and website.get("ok"):
+        failed = {c["key"]: c for c in website.get("checks", []) if c["status"] == "fail"}
+        if "ai_crawlers" in failed:
+            cands.append((0, {"title": "Unblock AI search on your website",
+                              "detail": failed["ai_crawlers"]["detail"] + ". " + failed["ai_crawlers"]["fix"],
+                              "why": "robots.txt"}))
+        if "indexable" in failed:
+            cands.append((0, {"title": "Remove the noindex tag from your website",
+                              "detail": failed["indexable"]["fix"], "why": "site hidden"}))
+        rest = [c for k, c in failed.items() if k not in ("ai_crawlers", "indexable") and c["weight"] >= 4]
+        if rest:
+            rest.sort(key=lambda c: -c["weight"])
+            cands.append((2, {"title": f"Fix your website's {len(rest)} gap{'s' if len(rest) != 1 else ''} for AI",
+                              "detail": " ".join(f"{c['label']}: {c['fix']}" for c in rest[:3]),
+                              "why": f"website {website['score']}/100"}))
+    elif website and not website.get("ok"):
+        cands.append((1, {"title": "Fix your website so it loads",
+                          "detail": f"We couldn't check your site: {website.get('error')} If the address is right and it "
+                                    f"opens fine for you, try the free website check again later -- otherwise AI crawlers "
+                                    f"are hitting the same problem.", "why": "website"}))
+
+    # ---- where this kind of business must be listed ----
+    country = (report.get("location_context") or {}).get("country")
+    niche = _niches.niche_for(noun)
+    niche_platforms = _niches.platforms_for(niche, country)
+    core_names = [p["name"] for p in _niches.CORE_PLATFORMS]
+    cands.append((3, {"title": f"Be listed where {(niche or {}).get('label', 'customers').lower()} customers look",
+                      "detail": "Same name, address, phone, hours and categories on: " + ", ".join(core_names)
+                                + (" -- plus " + ", ".join(p["name"] for p in niche_platforms[:3]) if niche_platforms else "")
+                                + ". Each assistant reads different ones (Gemini → Google, ChatGPT → Bing, Siri → Apple).",
+                      "why": "listings"}))
+
     seen_titles, actions = set(), []
     for _prio, a in sorted(cands, key=lambda x: x[0]):
         if a["title"] in seen_titles:
             continue
         seen_titles.add(a["title"])
+        a["pillar"] = _niches.PILLARS[_pillar_for(a["title"])]
         actions.append(a)
+
+    # ---- the three things assistants rely on: status per pillar ----
+    pillars = []
+    if you_p is not None and you_p.get("found"):
+        issues = sum(1 for k in ("website", "hours_listed") if not you_p.get(k))
+        pillars.append({"key": "listings", "label": "Google profile", "status": "good" if not issues else "warn",
+                        "detail": (you_p.get("category") or "Listed") + (" · missing " + ", ".join(
+                            x for x, k in (("website", "website"), ("hours", "hours_listed")) if not you_p.get(k)) if issues else " · complete")})
+        top = max(comp_p, key=lambda c: c.get("reviews") or 0) if comp_p else None
+        mine = you_p.get("reviews") or 0
+        ok_rev = not top or mine >= 0.7 * (top.get("reviews") or 0)
+        pillars.append({"key": "reviews", "label": "Reviews", "status": "good" if ok_rev else "bad",
+                        "detail": f"{mine:,} reviews" + (f" · {you_p['rating']:.1f}★" if you_p.get("rating") else "")
+                                  + (f" (top competitor {top['reviews']:,})" if top else "")})
+    elif you_p is not None:
+        pillars.append({"key": "listings", "label": "Google profile", "status": "bad", "detail": "Not found on Google Maps"})
+        pillars.append({"key": "reviews", "label": "Reviews", "status": "na", "detail": "No Google listing found"})
+    else:
+        pillars.append({"key": "listings", "label": "Google profile", "status": "na", "detail": "Compared on Pro"})
+        pillars.append({"key": "reviews", "label": "Reviews", "status": "na", "detail": "Compared on Pro"})
+    if website and website.get("ok"):
+        ws = website["score"]
+        pillars.append({"key": "website", "label": "Website", "status": "good" if ws >= 80 else "warn" if ws >= 50 else "bad",
+                        "detail": f"{ws}/100 AI-readiness"})
+    elif website:
+        pillars.append({"key": "website", "label": "Website", "status": "bad", "detail": "Couldn't load"})
+    else:
+        pillars.append({"key": "website", "label": "Website", "status": "na", "detail": "Add your website to check it"})
 
     label, playbook = match_category_playbook(category)
     return {
@@ -397,7 +500,7 @@ def derive_insights(report: dict, location: str = "") -> dict:
         "total_ok": total_ok,
         "headline": headline,
         "findings": findings[:5],
-        "actions": actions[:5],
+        "actions": actions[:6],
         "you_quotes": you_quotes,
         "competitor_quotes": competitor_quotes,
         "negatives": negatives[:3],
@@ -408,8 +511,13 @@ def derive_insights(report: dict, location: str = "") -> dict:
         "live_search_engines": sorted({r["provider"] for r in ok_results if r.get("live_search")}),
         "competitor_flags": report.get("competitor_flags") or [],
         "category_note": report.get("category_note"),
-        "playbook_label": label,
-        "playbook": playbook,
+        "playbook_label": (niche or {}).get("label") or label,
+        "playbook": playbook if not niche else [],
+        "niche_fixes": [{"pillar": _niches.PILLARS[p], "text": t.format(noun=noun, location=loc)}
+                        for p, t in (niche or {}).get("fixes", [])],
+        "platforms": [dict(p, core=True) for p in _niches.CORE_PLATFORMS] + niche_platforms,
+        "pillars": pillars,
+        "website": website,
         "all_demo": bool(results) and all(r.get("is_demo") for r in results),
     }
 

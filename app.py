@@ -175,6 +175,11 @@ def parse_and_validate_business_fields(form) -> dict:
 
     if not business or not category or not location:
         raise ValidationError("Business name, category and location are all required.")
+    from website_audit import normalize_site_url
+    website_raw = (form.get("website") or "").strip()
+    website = normalize_site_url(website_raw) if website_raw else ""
+    if website_raw and not website:
+        raise ValidationError("That website address doesn't look right -- e.g. yourbusiness.com.au")
     for field_name, value in [("business name", business), ("category", category), ("location", location)]:
         if len(value) > MAX_NAME_LEN:
             raise ValidationError(f"{field_name} is too long (max {MAX_NAME_LEN} characters).")
@@ -194,6 +199,7 @@ def parse_and_validate_business_fields(form) -> dict:
         "location": location, "competitors": competitors_raw,
         "tracked_competitors": tracked, "competitor_flags": flagged, "category_note": category_note,
         "competitor_meta": {k: v for k, v in meta.items() if k in competitors_raw},
+        "website": website,
     }
 
 
@@ -209,7 +215,7 @@ def _parse_num_queries(form, default: int = 6) -> int:
 
 # Pages worth indexing -- kept in one place so robots.txt, sitemap.xml and
 # each page's <meta name="robots"> all agree with each other.
-_INDEXABLE_PAGES = ["index", "pricing", "faq", "about", "how_it_works", "privacy", "terms"]
+_INDEXABLE_PAGES = ["index", "website_check", "pricing", "faq", "about", "how_it_works", "privacy", "terms"]
 
 
 # ---------- public landing / anonymous quick check ----------
@@ -228,6 +234,12 @@ def pricing():
 
 
 _FAQS = [
+    {"q": "Is my Google Business Profile all that matters?",
+     "a": "No. Gemini relies on Google Maps data, but ChatGPT's local answers lean on Bing (Bing Places), websites and directories, and Claude and Perplexity search the open web. You need consistent listings (Google, Bing, Apple and your industry's directories), recent reviews, and a website AI crawlers can read."},
+    {"q": "What does the website check look at?",
+     "a": "Whether AI search crawlers (ChatGPT, Claude, Perplexity, Google, Bing) are allowed in your robots.txt, whether the page is hidden from search, and whether your name, suburb, services, phone and hours are in plain text. Structured data and an FAQ are counted as helpful extras -- Google says they aren't required."},
+    {"q": "Why do you ask questions like \u201cemergency plumber available today\u201d?",
+     "a": "Because that's how customers ask. Each business type has its own question set (urgency, price, a specific service, who it's good for), and a miss on a question maps to a specific fix in your report."},
     {"q": "Is the visibility check really free?",
      "a": "Yes -- running a one-off check needs no account and no payment. Only weekly automatic monitoring of a saved business is a paid subscription."},
     {"q": "Which AI assistants does it check?",
@@ -387,6 +399,23 @@ def api_place_details():
     return details or {}
 
 
+@app.route("/website-check", methods=["GET", "POST"])
+@limiter.limit("15 per hour", methods=["POST"])
+def website_check():
+    """Free stand-alone tool: is this website readable by AI assistants and
+    clear about who/what/where? No AI calls involved, so it costs nothing."""
+    from website_audit import audit_website
+    result = None
+    form = {"website": "", "business": "", "location": "", "category": ""}
+    if request.method == "POST":
+        form = {k: (request.form.get(k) or "").strip()[:300] for k in form}
+        if not form["website"]:
+            flash("Enter your website address.")
+        else:
+            result = audit_website(form["website"], form["business"], form["location"], form["category"])
+    return render_template("website_check.html", result=result, form=form)
+
+
 @app.route("/api/resolve-link")
 @limiter.limit("20 per minute")
 def api_resolve_link():
@@ -462,7 +491,7 @@ def check():
 
     report = run_visibility_check(
         fields["business"], fields["category"], fields["location"], fields["tracked_competitors"],
-        num_queries=num_queries,
+        num_queries=num_queries, website=fields["website"] or None,
     )
     report["competitor_flags"] = fields["competitor_flags"]
     report["category_note"] = fields["category_note"]
@@ -539,6 +568,7 @@ def add_business():
         competitors=", ".join(fields["competitors"]),
         custom_questions="\n".join(fields["custom_questions"]),
         competitor_meta=json.dumps(fields["competitor_meta"]),
+        website=fields["website"],
     )
     db.session.add(business)
     db.session.commit()
@@ -596,6 +626,7 @@ def edit_business(business_id):
     business.location = fields["location"]
     business.competitors = ", ".join(fields["competitors"])
     business.custom_questions = "\n".join(fields["custom_questions"])
+    business.website = fields["website"]
     old_meta = business.competitor_meta_dict()
     business.competitor_meta = json.dumps({**{k: v for k, v in old_meta.items() if k in fields["competitors"]},
                                            **fields["competitor_meta"]})

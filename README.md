@@ -517,6 +517,51 @@ returned an auto shop in Aruba):
     business name).
   - Live warnings use the refined category.
 
+**Tenth pass** (built around how business owners think and buy):
+
+- **Foundations.** Visibility rests on three pillars, and the report scores
+  each one: Listings & profiles, Reviews, and Website. A Google Business
+  Profile alone isn't enough, because each assistant reads different
+  sources:
+  - Gemini reads Google Maps data.
+  - ChatGPT's local answers lean on Bing / Bing Places, websites and
+    directories.
+  - Claude and Perplexity search the live web.
+  - Siri uses Apple Business Connect.
+
+  This is explained on How it works and in the FAQ.
+- **Niche library (`niches.py`).** 28 business types (cafes, takeaway,
+  restaurants, bars, dentists, GPs, allied health, vets, barbers, salons,
+  gyms, emergency trades, builders, home services, mechanics, car care,
+  lawyers, accountants, real estate, childcare, tutoring, hotels, venues,
+  shops and more). Each has:
+  - the questions its customers actually ask AI, tagged by intent: urgent,
+    price, specialty, booking, audience, reviews;
+  - the listing platforms that matter for it, by country (AU/US/UK/...),
+    e.g. HotDoc, hipages, OpenTable, Fresha, Checkatrade, Zocdoc;
+  - pillar-tagged fixes.
+
+  A miss on an intent maps to a specific fix ("Make it obvious you take
+  urgent jobs", "Name the service you were missed for", ...).
+- **Website AI-readiness check (`website_audit.py`).** This runs in every
+  check when a website is given, and as a free stand-alone tool at
+  `/website-check`. It checks:
+  - AI search crawlers allowed in robots.txt: OAI-SearchBot,
+    Claude-SearchBot, PerplexityBot, Googlebot, Bingbot. Training bots are
+    shown as info only, because blocking them doesn't affect search.
+  - noindex, HTTPS, and name / suburb / services / phone / hours in plain
+    text.
+  - JavaScript-only pages.
+  - LocalBusiness JSON-LD and an FAQ, weighted as helpful, not required,
+    per Google's guidance.
+
+  Every fetch is guarded against SSRF: public IPs only, re-checked on every
+  redirect, ports 80/443, size and time caps.
+- **Gemini also uses Google Maps grounding**, with the customer's location.
+  If Maps grounding is rejected, it retries with Search only.
+- **The website field** is auto-filled from Google when a Maps link is
+  pasted (if Places is connected), and stored per monitored business.
+
 ## Going live -- checklist
 
 This runs correctly today with `python app.py` as a single process. Before

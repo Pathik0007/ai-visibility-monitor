@@ -65,6 +65,8 @@
       <label for="category">Category</label>
       <input id="category" name="category" required maxlength="200" placeholder="e.g. dentist, seafood restaurant, plumber"
              data-autocomplete-categories="1">
+      <label for="website">Website <span class="label-note">(optional -- we also check if AI can read it)</span></label>
+      <input id="website" name="website" type="text" inputmode="url" autocomplete="url" maxlength="300" placeholder="e.g. yourbusiness.com.au">
       <label for="competitors">Competitors (comma-separated, optional, up to {{ plan.competitors }})</label>
       <input id="competitors" name="competitors" maxlength="1000"
              data-autocomplete-multi="1" data-autocomplete-location="location">

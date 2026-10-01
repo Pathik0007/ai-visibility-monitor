@@ -90,6 +90,8 @@
              data-autocomplete-categories="1">
       <p class="hint">Start typing to pick from the list, or write your own.</p>
 
+      <label for="website">Website <span class="label-note">(optional -- we also check if AI can read it)</span></label>
+      <input id="website" name="website" type="text" inputmode="url" autocomplete="url" maxlength="300" placeholder="e.g. yourbusiness.com.au">
       <label for="competitors">Competitors <span style="font-weight:400;color:var(--muted-dim);">(optional, comma-separated, up to 5)</span></label>
       <input id="competitors" name="competitors" maxlength="1000" placeholder="e.g. Smile Studio, Bright Dental Care"
              data-autocomplete-multi="1" data-autocomplete-location="location">
@@ -121,7 +123,7 @@
       <div class="steps">
         <div class="step">
           <div class="step-n">1</div>
-          <div><p class="step-t">We ask the real questions your customers ask</p><p class="step-d">Realistic "best {category} in {location}" style prompts, sent to each AI assistant.</p></div>
+          <div><p class="step-t">We ask the questions your customers actually ask</p><p class="step-d">"Emergency plumber available today", "dentist good with nervous patients", "cheap burgers open late" -- the real intents for your kind of business, asked as a local customer.</p></div>
         </div>
         <div class="step">
           <div class="step-n">2</div>
@@ -129,13 +131,14 @@
         </div>
         <div class="step">
           <div class="step-n">3</div>
-          <div><p class="step-t">You get a tailored action plan</p><p class="step-d">Concrete steps specific to your business type and to whichever assistant is missing you.</p></div>
+          <div><p class="step-t">You get a plan for listings, reviews and your website</p><p class="step-d">The three things assistants rely on -- with the exact platforms for your industry and the fixes tied to what you were missed on. <a href="{{ url_for('website_check') }}">Free website check</a>.</p></div>
         </div>
       </div>
       <p style="margin-top:18px;"><a href="{{ url_for('how_it_works') }}">Read the full how-it-works breakdown →</a></p>
     </section>
 
     <footer style="margin-top:56px; padding-top:24px; border-top:1px solid var(--border-soft); display:flex; gap:18px; flex-wrap:wrap; font-size:0.85rem;">
+      <a href="{{ url_for('website_check') }}">Free website check</a>
       <a href="{{ url_for('pricing') }}">Pricing</a>
       <a href="{{ url_for('faq') }}">FAQ</a>
       <a href="{{ url_for('about') }}">About</a>

@@ -41,7 +41,8 @@ class Business(db.Model):
     location = db.Column(db.String(255), nullable=False)
     competitors = db.Column(db.Text, default="")
     custom_questions = db.Column(db.Text, default="")  # Pro: one question per line
-    competitor_meta = db.Column(db.Text, default="{}")  # {competitor name: category}, for mismatch checks
+    competitor_meta = db.Column(db.Text, default="{}")
+    website = db.Column(db.String(500), default="")  # optional; checked for AI-readiness each run  # {competitor name: category}, for mismatch checks
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     runs = db.relationship(
@@ -142,7 +143,7 @@ def add_missing_columns() -> None:
     from sqlalchemy import inspect, text
     wanted = {
         "user": [("plan", "VARCHAR(20) DEFAULT 'starter'")],
-        "business": [("custom_questions", "TEXT DEFAULT ''"), ("competitor_meta", "TEXT DEFAULT '{}'")],
+        "business": [("custom_questions", "TEXT DEFAULT ''"), ("competitor_meta", "TEXT DEFAULT '{}'"), ("website", "VARCHAR(500) DEFAULT ''")],
     }
     insp = inspect(db.engine)
     for table, cols in wanted.items():

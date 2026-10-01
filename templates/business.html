@@ -81,6 +81,8 @@
           <input id="location" name="location" required maxlength="200" value="{{ business.location }}" autocomplete="off" data-autocomplete-location-field="1">
           <label for="category">Category</label>
           <input id="category" name="category" required maxlength="200" value="{{ business.category }}" data-autocomplete-categories="1">
+          <label for="website">Website <span class="label-note">(optional -- we also check if AI can read it)</span></label>
+          <input id="website" name="website" type="text" inputmode="url" autocomplete="url" maxlength="300" placeholder="e.g. yourbusiness.com.au" value="{{ business.website or '' }}">
           <label for="competitors">Competitors (comma-separated{% if plan %}, up to {{ plan.competitors }}{% endif %})</label>
           <input id="competitors" name="competitors" maxlength="1000" value="{{ business.competitors }}"
                  data-autocomplete-multi="1" data-autocomplete-location="location">

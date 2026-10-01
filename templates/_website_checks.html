@@ -1,0 +1,21 @@
+{# Website AI-readiness result. Expects `w` (website_audit result). #}
+{% if w and w.ok %}
+<div class="web-score-row">
+  <div class="score-ring small {{ 'good' if w.score >= 80 else ('mid' if w.score >= 50 else 'bad') }}" style="--pct:{{ w.score }};"><span class="num">{{ w.score }}</span></div>
+  <div>
+    <p class="score-headline" style="margin:0;">{% if w.score >= 80 %}AI assistants can read this site and it says the right things.{% elif w.score >= 50 %}Readable, but missing details assistants look for.{% else %}AI assistants will struggle to use this site.{% endif %}</p>
+    <p class="sub small" style="margin:2px 0 0;"><a href="{{ w.final_url }}" target="_blank" rel="noopener nofollow">{{ w.final_url }}</a></p>
+  </div>
+</div>
+<ul class="web-checks">
+  {% for c in w.checks %}
+  <li class="wc wc-{{ c.status }}">
+    <span class="wc-icon">{% if c.status == 'pass' %}&#10003;{% elif c.status == 'warn' %}!{% elif c.status == 'info' %}i{% else %}&#10007;{% endif %}</span>
+    <div><strong>{{ c.label }}</strong> <span class="wc-detail">{{ c.detail }}</span>
+      {% if c.fix %}<div class="wc-fix">Fix: {{ c.fix }}</div>{% endif %}</div>
+  </li>
+  {% endfor %}
+</ul>
+{% elif w %}
+<div class="notice">Couldn't check the website: {{ w.error }}</div>
+{% endif %}

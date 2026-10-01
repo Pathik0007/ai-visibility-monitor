@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Free Website AI-Readiness Check -- AI Visibility Monitor</title>
+  <meta name="description" content="Free check: can ChatGPT, Claude, Perplexity and Gemini read your business website, and does it clearly say what you do, where and when?">
+  <meta property="og:title" content="Free Website AI-Readiness Check">
+  <meta property="og:description" content="See whether AI assistants can read your website and find your name, services, suburb, phone and hours.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', filename='og-image.png', _external=True) }}">
+  <meta property="og:url" content="{{ url_for('website_check', _external=True) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="{{ url_for('website_check', _external=True) }}">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="wrap">
+    <header class="hero">
+      <span class="eyebrow">Free tool &middot; no sign-up</span>
+      <h1>Can AI assistants read your website?</h1>
+      <p class="lead">ChatGPT, Claude and Perplexity cite business websites more than any other source for local questions. Check yours in 10 seconds.</p>
+    </header>
+
+    {% with messages = get_flashed_messages() %}{% if messages %}<div class="notice">{{ messages[0] }}</div>{% endif %}{% endwith %}
+
+    <form class="card glow" method="POST" action="{{ url_for('website_check') }}" data-loading-text="Checking your website…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="website">Website</label>
+      <input id="website" name="website" required maxlength="300" inputmode="url" placeholder="e.g. yourbusiness.com.au" value="{{ form.website }}">
+      <label for="business">Business name <span class="label-note">(optional -- checks it appears on the page)</span></label>
+      <input id="business" name="business" maxlength="200" value="{{ form.business }}">
+      <label for="location">Suburb <span class="label-note">(optional)</span></label>
+      <input id="location" name="location" maxlength="200" placeholder="e.g. North Ryde, NSW" value="{{ form.location }}">
+      <label for="category">What you do <span class="label-note">(optional)</span></label>
+      <input id="category" name="category" maxlength="200" placeholder="e.g. dentist" value="{{ form.category }}" data-autocomplete-categories="1">
+      <button type="submit">Check my website &rarr;</button>
+    </form>
+
+    {% if result %}
+    <div class="card">
+      <h3 class="card-title">Website AI-readiness</h3>
+      {% set w = result %}{% include "_website_checks.html" %}
+    </div>
+    <div class="card cta-card">
+      <h3 class="card-title">Now see if the assistants actually recommend you</h3>
+      <p class="sub small">The website is one of three things AI assistants rely on -- the others are your listings (Google, Bing, Apple) and reviews. Run the full free check to see what ChatGPT, Claude, Perplexity, Gemini and DeepSeek say.</p>
+      <a class="btn btn-sm" href="{{ url_for('index') }}">Run the free AI visibility check &rarr;</a>
+    </div>
+    {% endif %}
+
+    <section class="section-info">
+      <h2>What we check</h2>
+      <ul class="fixlist">
+        <li><strong>AI search crawlers allowed</strong> -- OAI-SearchBot (ChatGPT), Claude-SearchBot, PerplexityBot, Googlebot and Bingbot. Blocking these hides you from those answers.</li>
+        <li><strong>Not hidden from search</strong> -- no accidental "noindex".</li>
+        <li><strong>The basics in plain text</strong> -- business name, suburb, what you do, phone, opening hours. Many AI crawlers don't run JavaScript, so text has to be in the page.</li>
+        <li><strong>Helpful extras</strong> -- business structured data, an FAQ, a clear title and description. Google says these aren't required, but they help assistants confirm your details.</li>
+      </ul>
+    </section>
+  </div>
+  <script src="/static/autocomplete.js" defer></script>
+  <script src="/static/form-loading.js" defer></script>
+</body>
+</html>

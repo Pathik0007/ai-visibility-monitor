@@ -12,7 +12,7 @@ slowest single call instead of the sum of all of them.
 from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, wait
-from .query_generator import generate_queries
+from .query_generator import generate_queries_with_themes
 from .providers import ALL_PROVIDERS
 from .providers.base import NotConfiguredError
 from .analyzer import analyze_answer
@@ -95,12 +95,16 @@ def _location_context(location: str) -> dict | None:
 def run_visibility_check(business: str, category: str, location: str,
                           competitors: list[str], num_queries: int = 6,
                           extra_queries: list[str] | None = None,
-                          profile_benchmark: bool = False) -> dict:
-    queries = generate_queries(business, category, location, count=num_queries)
+                          profile_benchmark: bool = False,
+                          website: str | None = None) -> dict:
+    themed = generate_queries_with_themes(business, category, location, count=num_queries)
+    themes = {q: t for q, t in themed}
+    queries = [q for q, _ in themed]
     for q in extra_queries or []:
         q = " ".join(q.split())
         if q and q not in queries:
             queries.append(q)
+            themes[q] = "custom"
     tasks = [(query, provider) for query in queries for provider in ALL_PROVIDERS]
 
     if not tasks:
@@ -112,7 +116,11 @@ def run_visibility_check(business: str, category: str, location: str,
     # overall deadline: live web-search answers can take 20-40s each, and
     # the old 8-thread pool queued them in rounds -- long enough for the
     # web server to kill the request before the report was ever shown.
-    executor = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks)))
+    executor = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks)) + 1)
+    website_future = None
+    if website:
+        from website_audit import audit_website
+        website_future = executor.submit(audit_website, website, business, location, category)
     futures = {
         executor.submit(_run_one, query, provider, business, category, location, competitors, context): i
         for i, (query, provider) in enumerate(tasks)
@@ -127,10 +135,18 @@ def run_visibility_check(business: str, category: str, location: str,
                 results[i] = _error_result(provider, query, _redact_secrets(str(exc)))
         else:
             results[i] = _error_result(provider, query, "timed out")
+    website_report = None
+    if website_future is not None:
+        try:
+            website_report = website_future.result(timeout=max(5, OVERALL_TIMEOUT // 4))
+        except Exception:
+            website_report = {"ok": False, "url": website, "error": "The website check didn't finish in time."}
     executor.shutdown(wait=False, cancel_futures=True)
 
     report = build_report(business, category, competitors, results)
+    report["website"] = website_report
     report["location_context"] = context
+    report["question_themes"] = themes
     if profile_benchmark:
         try:
             from places import profile_benchmark as _benchmark

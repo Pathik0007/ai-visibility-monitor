@@ -93,6 +93,7 @@ def check_business_and_alert(business: Business) -> CheckRun:
         num_queries=plan["questions"],
         extra_queries=business.custom_question_list()[: plan["custom_questions"]],
         profile_benchmark=plan["profile_benchmark"],
+        website=business.website or None,
     )
     report["competitor_flags"] = flags
     from categories import refine_category

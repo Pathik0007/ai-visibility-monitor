@@ -142,7 +142,7 @@ def _split_name_address(text: str) -> tuple[str, str]:
 # ---------- resolution ----------
 
 def _google_lookup(info: dict, api_key: str) -> dict | None:
-    fields = "id,displayName,types,primaryType,addressComponents,location,shortFormattedAddress"
+    fields = "id,displayName,types,primaryType,addressComponents,location,shortFormattedAddress,websiteUri"
     headers = {"X-Goog-Api-Key": api_key, "Content-Type": "application/json"}
     place = None
     if info.get("place_id") and re.fullmatch(r"[A-Za-z0-9_-]{10,400}", info["place_id"]):
@@ -186,6 +186,7 @@ def _google_lookup(info: dict, api_key: str) -> dict | None:
         "full_address": place.get("shortFormattedAddress", ""),
         "lat": loc.get("latitude"), "lon": loc.get("longitude"),
         "country": find("country", short=True) or None,
+        "website": place.get("websiteUri") or "",
         "source": "google",
     }
 

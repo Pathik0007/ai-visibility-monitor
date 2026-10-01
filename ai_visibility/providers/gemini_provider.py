@@ -15,17 +15,22 @@ class GeminiProvider(BaseProvider):
         key = self.api_key()
         if not key:
             raise NotConfiguredError()
+        # Grounded in Google Search *and* Google Maps (Business Profile data),
+        # the way the Gemini app answers local questions. Maps grounding can
+        # be combined with Search on Gemini 3.5 Flash and later; if a model
+        # or key rejects it, retry with Search only rather than failing.
+        body = {"contents": [{"parts": [{"text": query}]}],
+                "tools": [{"google_search": {}}, {"googleMaps": {}}]}
+        if context and context.get("lat") is not None and context.get("lon") is not None:
+            body["toolConfig"] = {"retrievalConfig": {"latLng": {"latitude": context["lat"], "longitude": context["lon"]}}}
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model()}:generateContent"
         # Key in a header, never the URL (URLs end up in error text/logs).
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model()}:generateContent",
-            headers={"content-type": "application/json", "x-goog-api-key": key},
-            json={
-                "contents": [{"parts": [{"text": query}]}],
-                # Grounded in live Google Search, like the Gemini app.
-                "tools": [{"google_search": {}}],
-            },
-            timeout=PROVIDER_TIMEOUT,
-        )
+        headers = {"content-type": "application/json", "x-goog-api-key": key}
+        resp = requests.post(url, headers=headers, json=body, timeout=PROVIDER_TIMEOUT)
+        if resp.status_code == 400:
+            body.pop("toolConfig", None)
+            body["tools"] = [{"google_search": {}}]
+            resp = requests.post(url, headers=headers, json=body, timeout=PROVIDER_TIMEOUT)
         if resp.status_code != 200:
             raise http_error(resp, "Gemini")
         data = resp.json()
@@ -36,6 +41,10 @@ class GeminiProvider(BaseProvider):
             raise RuntimeError(f"Gemini returned no text (finishReason: {cand.get('finishReason', 'unknown')})")
         sources = []
         for chunk in (cand.get("groundingMetadata") or {}).get("groundingChunks") or []:
+            place = chunk.get("maps")
+            if place:
+                sources.append(make_source(place.get("uri"), place.get("title", ""), domain="google maps"))
+                continue
             web = chunk.get("web") or {}
             # Gemini's uri is a Google redirect; its title is the site's domain.
             title = web.get("title", "")

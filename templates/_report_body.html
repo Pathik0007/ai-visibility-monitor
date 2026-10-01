@@ -48,9 +48,20 @@
     {% for f in ins.findings %}<li>{{ f }}</li>{% endfor %}
   </ul>
   {% endif %}
+  {% if ins.pillars %}
+  <div class="pillars">
+    {% for p in ins.pillars %}
+    <div class="pillar pillar-{{ p.status }}">
+      <span class="pillar-label">{{ p.label }}</span>
+      <span class="pillar-status">{% if p.status == 'good' %}Good{% elif p.status == 'warn' %}Needs work{% elif p.status == 'bad' %}Problem{% else %}Not checked{% endif %}</span>
+      <span class="pillar-detail">{{ p.detail }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 
-{% if ins.actions or ins.playbook %}
+{% if ins.actions or ins.playbook or ins.niche_fixes %}
 <div class="card">
   <h3 class="card-title">What to do next{% if ins.all_demo %} <span class="badge demo">example</span>{% endif %}</h3>
   {% if ins.all_demo %}<p class="sub small" style="margin:0 0 4px;">Example steps generated from the sample answers above -- your real steps appear once live checks are on.</p>{% endif %}
@@ -58,11 +69,27 @@
   <ol class="actions">
     {% for a in ins.actions %}
     <li>
-      <div class="action-head"><strong>{{ a.title }}</strong>{% if a.why %}<span class="why">{{ a.why }}</span>{% endif %}</div>
+      <div class="action-head"><strong>{{ a.title }}</strong>{% if a.why %}<span class="why">{{ a.why }}</span>{% endif %}{% if a.pillar %}<span class="pillar-tag">{{ a.pillar }}</span>{% endif %}</div>
       <p>{{ a.detail }}</p>
     </li>
     {% endfor %}
   </ol>
+  {% endif %}
+  {% if ins.niche_fixes or ins.platforms %}
+  <details class="more">
+    <summary>Playbook for {{ ins.playbook_label|lower }}: where to be listed and what to fix</summary>
+    {% if ins.platforms %}
+    <p class="sub small" style="margin:10px 0 6px;">Be listed (same name, address, phone and hours) on:</p>
+    <div class="platform-chips">
+      {% for p in ins.platforms %}{% if p.url %}<a class="chip{{ ' core' if p.core else '' }}" href="{{ p.url }}" target="_blank" rel="noopener nofollow" title="{{ p.why or '' }}">{{ p.name }}</a>{% else %}<span class="chip">{{ p.name }}</span>{% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if ins.niche_fixes %}
+    <ul class="fixlist">
+      {% for f in ins.niche_fixes %}<li><span class="pillar-tag">{{ f.pillar }}</span> {{ f.text }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </details>
   {% endif %}
   {% if ins.playbook %}
   <details class="more"{% if not ins.actions %} open{% endif %}>
@@ -72,6 +99,13 @@
     </ul>
   </details>
   {% endif %}
+</div>
+{% endif %}
+
+{% if ins.website %}
+<div class="card">
+  <h3 class="card-title">Your website: can AI assistants read it?</h3>
+  {% set w = ins.website %}{% include "_website_checks.html" %}
 </div>
 {% endif %}
 
