@@ -706,6 +706,7 @@ def run_business_now(business_id):
 # ---------- misc ----------
 
 @app.route("/healthz")
+@limiter.exempt  # health probes poll every few seconds; default 200/hour limit caused 429s
 def healthz():
     """Plain liveness check for uptime monitors / load balancers -- touches
     the DB too so a broken connection shows up as unhealthy, not just a 200."""
