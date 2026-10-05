@@ -16,6 +16,7 @@ Then open http://localhost:5000
 
 from __future__ import annotations
 import os
+import sys
 import json
 import atexit
 from datetime import date
@@ -28,7 +29,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 load_dotenv()
 
 from extensions import csrf, limiter
-from models import db, User, Business, CheckRun, add_missing_columns
+from models import db, User, Business, CheckRun, init_schema
+from locks import exclusive
 from plans import PLANS, FREE_CHECK, plan_for
 from auth import auth_bp
 from billing import billing_bp
@@ -40,11 +42,13 @@ from places import search_places, geocode_location, place_details, valid_session
 from categories import search_categories
 import report_cache
 
-IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
+# Render sets RENDER=true on every service, so production hardening can't be
+# skipped by forgetting FLASK_ENV.
+IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production" or bool(os.environ.get("RENDER"))
 DEFAULT_DEV_SECRET = "dev-secret-change-me"
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", DEFAULT_DEV_SECRET)
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "").strip() or DEFAULT_DEV_SECRET
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", "sqlite:///" + os.path.join(os.path.dirname(__file__), "data.db")
 )
@@ -66,11 +70,15 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION
 
 if IS_PRODUCTION and app.config["SECRET_KEY"] == DEFAULT_DEV_SECRET:
-    raise RuntimeError(
-        "FLASK_ENV=production but FLASK_SECRET_KEY is unset (still using the dev "
-        "default). Set a real random secret in .env before going live -- e.g. "
-        "`python -c \"import secrets; print(secrets.token_hex(32))\"`."
-    )
+    # Never run production on the public dev secret (anyone could forge a
+    # login cookie). Rather than crash the deploy, use a random per-boot
+    # secret -- safe, but everyone is logged out on each restart -- and say
+    # so loudly so a real FLASK_SECRET_KEY gets set.
+    import secrets as _secrets
+    app.config["SECRET_KEY"] = _secrets.token_hex(32)
+    print("WARNING: FLASK_SECRET_KEY is not set -- using a random temporary secret. "
+          "Set FLASK_SECRET_KEY (python -c \"import secrets; print(secrets.token_hex(32))\") "
+          "so logins survive restarts.", file=sys.stderr)
 
 db.init_app(app)
 
@@ -94,8 +102,7 @@ app.register_blueprint(billing_bp)
 csrf.exempt(billing_bp)
 
 with app.app_context():
-    db.create_all()
-    add_missing_columns()
+    init_schema()
 
 
 @app.context_processor
@@ -180,6 +187,8 @@ def parse_and_validate_business_fields(form) -> dict:
     website = normalize_site_url(website_raw) if website_raw else ""
     if website_raw and not website:
         raise ValidationError("That website address doesn't look right -- e.g. yourbusiness.com.au")
+    if len(website) > 500:
+        raise ValidationError("That website address is too long (max 500 characters).")
     for field_name, value in [("business name", business), ("category", category), ("location", location)]:
         if len(value) > MAX_NAME_LEN:
             raise ValidationError(f"{field_name} is too long (max {MAX_NAME_LEN} characters).")
@@ -549,9 +558,13 @@ def add_business():
     if not plan:
         flash("Choose a plan first to add a business to monitor.")
         return redirect(url_for("dashboard"))
-    if Business.query.filter_by(user_id=current_user.id).count() >= plan["businesses"]:
-        flash(f"Your {plan['name']} plan monitors {plan['businesses']} business"
-              f"{'es' if plan['businesses'] != 1 else ''}. Upgrade to Pro for up to {PLANS['pro']['businesses']}.")
+    def over_limit() -> bool:
+        return Business.query.filter_by(user_id=current_user.id).count() >= plan["businesses"]
+
+    limit_msg = (f"Your {plan['name']} plan monitors {plan['businesses']} business"
+                 f"{'es' if plan['businesses'] != 1 else ''}. Upgrade to Pro for up to {PLANS['pro']['businesses']}.")
+    if over_limit():
+        flash(limit_msg)
         return redirect(url_for("dashboard"))
 
     try:
@@ -560,18 +573,24 @@ def add_business():
         flash(str(e))
         return redirect(url_for("dashboard"))
 
-    business = Business(
-        user_id=current_user.id,
-        name=fields["business"],
-        category=fields["category"],
-        location=fields["location"],
-        competitors=", ".join(fields["competitors"]),
-        custom_questions="\n".join(fields["custom_questions"]),
-        competitor_meta=json.dumps(fields["competitor_meta"]),
-        website=fields["website"],
-    )
-    db.session.add(business)
-    db.session.commit()
+    # Count-then-insert under a per-user lock: two parallel submits (double
+    # click, two tabs) must not both slip under the plan's business limit.
+    with exclusive(db, f"add-business-{current_user.id}", wait=True):
+        if over_limit():
+            flash(limit_msg)
+            return redirect(url_for("dashboard"))
+        business = Business(
+            user_id=current_user.id,
+            name=fields["business"],
+            category=fields["category"],
+            location=fields["location"],
+            competitors=", ".join(fields["competitors"]),
+            custom_questions="\n".join(fields["custom_questions"]),
+            competitor_meta=json.dumps(fields["competitor_meta"]),
+            website=fields["website"],
+        )
+        db.session.add(business)
+        db.session.commit()
 
     check_business_and_alert(business)  # first run -- no "previous" yet, so no alert fires
     return redirect(url_for("business_detail", business_id=business.id))
@@ -693,11 +712,13 @@ def healthz():
     from places import google_status
     try:
         db.session.execute(db.text("SELECT 1"))
-        return {"status": "ok", **google_status(), "ai_providers": {
-            p.display_name: ("live: " + p.model()) if p.is_configured() else "sample (no API key)"
-            for p in ALL_PROVIDERS}}, 200
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}, 503
+    except Exception:
+        # Driver errors include the DB host/user -- log them, don't publish them.
+        app.logger.exception("healthz: database check failed")
+        return {"status": "error", "detail": "database unavailable"}, 503
+    return {"status": "ok", **google_status(), "ai_providers": {
+        p.display_name: ("live: " + p.model()) if p.is_configured() else "sample (no API key)"
+        for p in ALL_PROVIDERS}}, 200
 
 
 @app.errorhandler(404)
@@ -730,14 +751,11 @@ def server_error(e):
 
 # ---------- weekly scheduler ----------
 #
-# In-process scheduling only works correctly with exactly one running
-# process. It's fine for `python app.py` locally, but a real deployment
-# behind Gunicorn typically runs several worker processes -- each would
-# start its own copy of this scheduler and every saved business would get
-# checked (and its owner emailed) once per worker, not once. So this is ON
-# by default for the simple single-process case, and must be turned OFF
-# once you run more than one worker; use scheduled_job.py from the host's
-# own cron/scheduler feature instead (see README "Going live").
+# Every Gunicorn worker starts its own copy of this scheduler, so
+# run_weekly_checks takes a cross-process lock (Postgres advisory lock, or a
+# file lock on SQLite): only one copy actually runs at a time, and a business
+# that was just checked is no longer "due" for the others. With a host cron
+# job running scheduled_job.py instead, set ENABLE_INPROCESS_SCHEDULER=0.
 
 if os.environ.get("ENABLE_INPROCESS_SCHEDULER", "1") == "1":
     scheduler = BackgroundScheduler()

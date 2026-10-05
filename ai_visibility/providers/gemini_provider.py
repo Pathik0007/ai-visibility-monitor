@@ -1,5 +1,4 @@
-import requests
-from .base import BaseProvider, NotConfiguredError, PROVIDER_TIMEOUT, http_error, make_source, dedupe_sources
+from .base import BaseProvider, NotConfiguredError, http_error, make_source, dedupe_sources, post_json, remaining
 
 
 class GeminiProvider(BaseProvider):
@@ -26,18 +25,18 @@ class GeminiProvider(BaseProvider):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model()}:generateContent"
         # Key in a header, never the URL (URLs end up in error text/logs).
         headers = {"content-type": "application/json", "x-goog-api-key": key}
-        resp = requests.post(url, headers=headers, json=body, timeout=PROVIDER_TIMEOUT)
-        if resp.status_code == 400:
+        resp = post_json(url, headers=headers, body=body, provider="Gemini", context=context)
+        if resp.status_code == 400 and remaining(context) > 15:
             body.pop("toolConfig", None)
             body["tools"] = [{"google_search": {}}]
-            resp = requests.post(url, headers=headers, json=body, timeout=PROVIDER_TIMEOUT)
+            resp = post_json(url, headers=headers, body=body, provider="Gemini", context=context)
         if resp.status_code != 200:
             raise http_error(resp, "Gemini")
         data = resp.json()
         cand = (data.get("candidates") or [{}])[0]
         parts = (cand.get("content") or {}).get("parts") or []
-        text = "".join(p.get("text", "") for p in parts)
-        if not text:
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and not p.get("thought"))
+        if not text.strip():
             raise RuntimeError(f"Gemini returned no text (finishReason: {cand.get('finishReason', 'unknown')})")
         sources = []
         for chunk in (cand.get("groundingMetadata") or {}).get("groundingChunks") or []:

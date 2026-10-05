@@ -212,9 +212,15 @@ def _dedupe(results: list[dict]) -> list[dict]:
         dup = False
         for o in out:
             if " ".join(tokens(o["name"])) == key_name:
-                close = (r.get("lat") is None or o.get("lat") is None or
-                         haversine_km(r["lat"], r["lon"], o["lat"], o["lon"]) < 0.3)
-                same_addr = fold(r.get("full_address", "")) == fold(o.get("full_address", ""))
+                # Without coordinates (Google suggestions have none) only the
+                # address can tell branches apart -- "close" can't be assumed,
+                # or every branch of a chain collapsed into one suggestion.
+                if r.get("lat") is not None and o.get("lat") is not None:
+                    close = haversine_km(r["lat"], r["lon"], o["lat"], o["lon"]) < 0.3
+                else:
+                    close = False
+                addr_r, addr_o = fold(r.get("full_address", "")), fold(o.get("full_address", ""))
+                same_addr = addr_r == addr_o and (bool(addr_r) or (r.get("lat") is None and o.get("lat") is None))
                 if close or same_addr:
                     dup = True
                     break

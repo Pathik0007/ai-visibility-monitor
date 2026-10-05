@@ -58,16 +58,22 @@
     if (biasByLocationEl.has(locationInput)) return biasByLocationEl.get(locationInput);
 
     var state = { lat: null, lon: null, country: null };
+    var geoSeq = 0;  // only the newest lookup may update the bias
+    function clearBias() { state.lat = null; state.lon = null; state.country = null; }
     var runGeocode = debounce(function (text) {
       text = text.trim();
-      if (text.length < 3) { state.lat = null; state.lon = null; return; }
+      var mine = ++geoSeq;
+      if (text.length < 3) { clearBias(); return; }
       fetch("/api/geocode?q=" + encodeURIComponent(text) + tzParam())
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
+          if (mine !== geoSeq) return;  // a newer lookup or an exact pick won
           if (data && data.lat != null && data.lon != null) {
             state.lat = data.lat;
             state.lon = data.lon;
             state.country = data.country || null;
+          } else {
+            clearBias();  // unknown place: don't keep biasing to the old one
           }
         })
         .catch(function () { /* silent -- search just stays unbiased */ });
@@ -75,6 +81,7 @@
 
     state.refresh = runGeocode;
     state.setExact = function (lat, lon, country) {
+      geoSeq++;  // cancel any in-flight lookup of a partial word
       state.lat = lat; state.lon = lon; state.country = country || state.country;
     };
     locationInput.addEventListener("input", function () { runGeocode(locationInput.value); });
@@ -162,6 +169,13 @@
     }
 
     function loading() {
+      // The text changed, so a highlighted old suggestion no longer matches
+      // it: Enter must not pick it while the new search is still running.
+      list.querySelectorAll(".ac-item-active").forEach(function (el) {
+        el.classList.remove("ac-item-active"); el.setAttribute("aria-selected", "false");
+      });
+      activeIndex = -1;
+      input.removeAttribute("aria-activedescendant");
       if (!list.hidden && currentResults.length) return; // keep old results visible while refreshing
       list.innerHTML = "";
       var li = document.createElement("li");

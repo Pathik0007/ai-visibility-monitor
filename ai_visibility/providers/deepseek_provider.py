@@ -1,5 +1,4 @@
-import requests
-from .base import BaseProvider, NotConfiguredError, PROVIDER_TIMEOUT, http_error
+from .base import BaseProvider, NotConfiguredError, http_error, post_json, require_answer
 
 
 class DeepSeekProvider(BaseProvider):
@@ -17,12 +16,14 @@ class DeepSeekProvider(BaseProvider):
         key = self.api_key()
         if not key:
             raise NotConfiguredError()
-        resp = requests.post(
+        resp = post_json(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
-            json={"model": self.model(), "messages": [{"role": "user", "content": query}], "max_tokens": 800},
-            timeout=PROVIDER_TIMEOUT,
+            body={"model": self.model(), "messages": [{"role": "user", "content": query}], "max_tokens": 1000},
+            provider="DeepSeek", context=context,
         )
         if resp.status_code != 200:
             raise http_error(resp, "DeepSeek")
-        return {"text": resp.json()["choices"][0]["message"]["content"], "sources": []}
+        choice = (resp.json().get("choices") or [{}])[0]
+        text = (choice.get("message") or {}).get("content") or ""
+        return {"text": require_answer(text, "DeepSeek", f"finish_reason: {choice.get('finish_reason')}"), "sources": []}

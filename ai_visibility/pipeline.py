@@ -11,6 +11,8 @@ slowest single call instead of the sum of all of them.
 
 from __future__ import annotations
 import os
+import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor, wait
 from .query_generator import generate_queries_with_themes
 from .providers import ALL_PROVIDERS
@@ -51,7 +53,9 @@ def _error_result(provider, query: str, message: str, is_demo: bool = False) -> 
 
 def _run_one(query: str, provider, business: str, category: str, location: str,
              competitors: list[str], context: dict | None = None) -> dict:
-    seed = hash((business, provider.name, query)) & 0xFFFFFFFF
+    # Stable across processes (str hash() is randomised per process, which
+    # made the web app and the scheduled job disagree on sample answers).
+    seed = zlib.crc32(f"{business}|{provider.name}|{query}".encode())
     is_demo = not provider.is_configured()
     sources: list[dict] = []
 
@@ -110,7 +114,12 @@ def run_visibility_check(business: str, category: str, location: str,
     if not tasks:
         return build_report(business, category, competitors, [])
 
-    context = _location_context(location)
+    # One deadline for the whole check, started before geocoding. Providers
+    # read it from the context to cap their own timeouts and retries, so
+    # calls that miss it stop instead of running (and billing) on.
+    deadline = time.monotonic() + OVERALL_TIMEOUT
+    location_context = _location_context(location)
+    context = {**(location_context or {}), "deadline": deadline}
     results: list[dict | None] = [None] * len(tasks)
     # Every call runs at once (they're network waits, not CPU), with one
     # overall deadline: live web-search answers can take 20-40s each, and
@@ -125,7 +134,7 @@ def run_visibility_check(business: str, category: str, location: str,
         executor.submit(_run_one, query, provider, business, category, location, competitors, context): i
         for i, (query, provider) in enumerate(tasks)
     }
-    done, _pending = wait(futures, timeout=OVERALL_TIMEOUT)
+    done, _pending = wait(futures, timeout=max(1, deadline - time.monotonic()))
     for future, i in futures.items():
         query, provider = tasks[i]
         if future in done:
@@ -138,20 +147,20 @@ def run_visibility_check(business: str, category: str, location: str,
     website_report = None
     if website_future is not None:
         try:
-            website_report = website_future.result(timeout=max(5, OVERALL_TIMEOUT // 4))
+            website_report = website_future.result(timeout=max(2, deadline - time.monotonic()))
         except Exception:
             website_report = {"ok": False, "url": website, "error": "The website check didn't finish in time."}
     executor.shutdown(wait=False, cancel_futures=True)
 
     report = build_report(business, category, competitors, results)
     report["website"] = website_report
-    report["location_context"] = context
+    report["location_context"] = location_context
     report["question_themes"] = themes
     if profile_benchmark:
         try:
             from places import profile_benchmark as _benchmark
             report["profiles"] = _benchmark(business, location, report.get("top_competitors") or [],
-                                            competitors, context)
+                                            competitors, location_context)
         except Exception as exc:
             report["profiles"] = {"error": str(exc)[:200]}
     return report

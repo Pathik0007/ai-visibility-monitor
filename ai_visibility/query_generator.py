@@ -129,8 +129,9 @@ def generate_queries_with_themes(business: str, category: str, location: str, co
     i = 0
     while len(out) < count and i < len(TEMPLATES) * 4:
         template = TEMPLATES[i % len(TEMPLATES)]
-        q = _sentence_case(template.format(category=noun, location=location, business=business,
-                                           audience=audiences[(i // len(TEMPLATES)) % len(audiences)]))
+        q = template.format(category=noun, location="\x00", business=business,
+                            audience=audiences[(i // len(TEMPLATES)) % len(audiences)])
+        q = _sentence_case(niches.fix_grammar(q).replace("\x00", location))
         if q not in [x for x, _ in out]:
             out.append((q, question_theme(q)))
         i += 1

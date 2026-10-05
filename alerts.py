@@ -9,6 +9,7 @@ real mail account.
 """
 
 from __future__ import annotations
+import logging
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -87,6 +88,7 @@ def check_business_and_alert(business: Business) -> CheckRun:
 
     from category_match import screen_competitors
     tracked, flags = screen_competitors(business.category, business.competitor_list(), business.competitor_meta_dict())
+    tracked = tracked[: plan["competitors"]]  # a Pro -> Starter downgrade keeps old lists
     from categories import refine_category as _refine
     report = run_visibility_check(
         business.name, _refine(business.name, business.category)[0], business.location, tracked,
@@ -128,10 +130,27 @@ def run_weekly_checks(app) -> None:
     """Scheduled entry point (run it at least every 12 hours): re-checks
     every subscribed business that's due under its plan -- weekly on
     Starter, twice a week on Pro."""
+    from locks import exclusive
+    from plans import plan_for
     with app.app_context():
-        for business in Business.query.all():
-            if is_due(business):
+        with exclusive(db, "scheduled-checks") as got:
+            if not got:
+                return  # another worker / the cron job is already doing this run
+            seen_per_user: dict[int, int] = {}
+            ids = [b.id for b in Business.query.order_by(Business.id).all()]
+            for business_id in ids:
+                business = db.session.get(Business, business_id)
+                if business is None:
+                    continue
+                # Only the first N businesses of a plan are checked (N = the
+                # plan's limit), so a downgrade can't keep paying for extras.
+                plan = plan_for(business.owner)
+                n = seen_per_user.get(business.user_id, 0)
+                seen_per_user[business.user_id] = n + 1
+                if not plan or n >= plan["businesses"] or not is_due(business):
+                    continue
                 try:
                     check_business_and_alert(business)
-                except Exception as exc:
-                    print(f"[scheduler] check failed for business {business.id}: {exc}")
+                except Exception:
+                    db.session.rollback()  # keep the session usable for the next business
+                    logging.getLogger(__name__).exception("scheduled check failed for business %s", business_id)

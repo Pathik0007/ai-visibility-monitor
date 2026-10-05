@@ -108,7 +108,11 @@ NICHES: list[dict] = [
                ("reviews", "Ask for reviews that name the item (“best smash burger in Ryde”) -- that wording is exactly what gets repeated back."),
                ("website", "Put a plain-text menu with prices on your own site (not just a PDF or image) so AI search can read it.")]},
     {"key": "restaurant", "label": "Restaurants", "group": "food",
-     "match": r"\b(restaurants?|bistro|eatery|diner|steakhouse|sushi|ramen|dumplings?|thai|indian|italian|chinese|japanese|korean|vietnamese|mexican|lebanese|turkish|greek|seafood|grill|bbq|barbecue)",
+     "match": r"\b(restaurants?|bistro|eatery|diner|steakhouse|sushi|ramen|dumplings?|seafood|grill|bbq|barbecue)\b|"
+              # cuisine words only when they mean food -- not "Chinese medicine",
+              # "Japanese language school", "Indian grocery store", "Thai massage"
+              r"\b(thai|indian|italian|chinese|japanese|korean|vietnamese|mexican|lebanese|turkish|greek)\b"
+              r"(?!\s+(?:medicine|herbal\w*|language|grocer\w*|store|shop|supermarket|school|massage|tutor\w*|lessons?|translat\w*|class\w*))",
      "questions": [("Best {noun} for dinner in {location}?", "specialty"),
                    ("Good {noun} in {location} for a date night?", "audience"),
                    ("Affordable {noun} in {location} that's actually good?", "price"),
@@ -164,7 +168,7 @@ NICHES: list[dict] = [
      "fixes": [("listings", "Keep hours, billing policy and “new patients welcome” up to date on Google and your booking platform."),
                ("website", "List each doctor with their interests (women's health, kids, skin checks) -- assistants match these to questions.")]},
     {"key": "allied", "label": "Physio, chiro & allied health", "group": "health",
-     "match": r"\b(physio\w*|chiropract\w*|osteopath\w*|podiatr\w*|massage therap\w*|myotherap\w*|occupational therap\w*|speech path\w*|dietitian|nutritionist|acupunct\w*|psycholog\w*|counsell?\w*)",
+     "match": r"\b(physio\w*|chiropract\w*|osteopath\w*|podiatr\w*|massage therap\w*|myotherap\w*|occupational therap\w*|speech path\w*|dietitian|nutritionist|acupunct\w*|chinese medicine|herbalist|naturopath\w*|psycholog\w*|counsell?\w*)",
      "questions": [("Best {noun} in {location} for back pain?", "specialty"),
                    ("{noun_cap} in {location} that does sports injuries?", "specialty"),
                    ("{noun_cap} in {location} with weekend or evening appointments?", "hours"),
@@ -182,7 +186,7 @@ NICHES: list[dict] = [
      "platforms": {"AU": ["HotDoc", "HealthEngine"], "US": ["Zocdoc"], "*": []},
      "fixes": [("listings", "Show bulk-billed eye tests / insurance accepted and online booking on Google.")]},
     {"key": "vet", "label": "Vets & pet care", "group": "pets",
-     "match": r"\b(vets?|veterinar\w*|animal hospital|pet groom\w*|dog groom\w*|groomers?|dog train\w*|pet sitt\w*|dog walk\w*|kennels?)",
+     "match": r"\b(vets?\b|veterinar\w*|animal hospital|pet groom\w*|dog groom\w*|groomers?|dog train\w*|pet sitt\w*|dog walk\w*|kennels?)",
      "questions": [("Is there an emergency vet open now in {location}?", "urgent"),
                    ("Which {noun} in {location} is good with anxious dogs?", "audience"),
                    ("How much does a {noun} visit cost in {location}?", "price"),
@@ -212,7 +216,7 @@ NICHES: list[dict] = [
      "fixes": [("listings", "Turn on online booking (Fresha/Booksy/your system) and link it from Google -- “can I book now” is a top question."),
                ("website", "Show a price list and photos of your specialty work (fades, balayage) on your site and Instagram.")]},
     {"key": "beauty", "label": "Nails, beauty & spa", "group": "beauty",
-     "match": r"\b(nails?|beauty|spa|lash\w*|brows?|eyebrow|waxing|facials?|skin ?care|cosmetic|tanning|massage)",
+     "match": r"\b(nails?|beauty|spas?|day spa|lash\w*|brows?|eyebrow|waxing|facials?|skin ?care|cosmetic|tanning|massage)\b",
      "questions": [("{noun_cap} in {location} with same-day appointments?", "booking"),
                    ("{noun_cap} in {location} that sells gift vouchers?", "audience"),
                    ("Clean, hygienic {noun} in {location}?", "reviews"),
@@ -279,7 +283,7 @@ NICHES: list[dict] = [
      "fixes": [("website", "List packages with prices and how long each takes."),
                ("listings", "Add before/after photos to Google -- they're what people check first.")]},
     {"key": "auto", "label": "Mechanics & auto services", "group": "automotive",
-     "match": r"\b(mechanics?|car repair|auto\w*|tyres?|tires?|smash repair|panel beat\w*|car service|car wash|detailing|windscreen|brakes?)",
+     "match": r"\b(mechanics?|car repair|auto(?:motive|mobile)?\b|auto (?:repair|electric\w*|service)|tyres?|tires?|smash repair|panel beat\w*|car service|car wash|detailing|windscreen|brakes?)",
      "questions": [("Honest {noun} in {location} that doesn't overcharge?", "reviews"),
                    ("How much does a {noun} cost in {location}?", "price"),
                    ("{noun_cap} in {location} that can fit me in today?", "urgent"),
@@ -298,7 +302,7 @@ NICHES: list[dict] = [
      "fixes": [("website", "Give each practice area its own page with plain-English FAQs and fee information."),
                ("listings", "Keep your profile current on the law society / bar directory for your region.")]},
     {"key": "finance", "label": "Accountants & finance", "group": "professional",
-     "match": r"\b(accountant\w*|accounting|tax|bookkeep\w*|mortgage|financial plann\w*|finance broker|insurance)",
+     "match": r"\b(accountant\w*|accounting|tax(?:ation|es)?\b|tax agent|bookkeep\w*|mortgage|financial plann\w*|finance broker|insurance)",
      "questions": [("{noun_cap} in {location} for small business owners?", "audience"),
                    ("How much does a {noun} charge in {location}?", "price"),
                    ("Which {noun} in {location} has the best reviews?", "reviews")],
@@ -315,7 +319,7 @@ NICHES: list[dict] = [
                ("website", "Publish recent sales with suburb and result -- proof assistants can quote.")]},
     # ---------------- education & childcare ----------------
     {"key": "childcare", "label": "Childcare & early learning", "group": "education",
-     "match": r"\b(child ?care|early learning|daycare|preschool|kindergarten|kinder|creche|nursery)",
+     "match": r"\b(child ?care|early learning|daycare|preschool|kindergarten|kinder|creche|(?<!plant )(?<!garden )(?<!tree )nursery)\b",
      "questions": [("Best childcare centre in {location} with vacancies?", "booking"),
                    ("How much does daycare cost per day in {location}?", "price"),
                    ("Childcare in {location} with good reviews from parents?", "reviews"),
@@ -332,7 +336,7 @@ NICHES: list[dict] = [
      "fixes": [("website", "Show subjects/levels, prices and results (with permission) -- “good results” questions need evidence to cite.")]},
     # ---------------- accommodation & venues ----------------
     {"key": "accommodation", "label": "Hotels & stays", "group": "accommodation",
-     "match": r"\b(hotels?|motels?|hostels?|resorts?|bed and breakfast|b&b|guest ?house|serviced apartment|inn|lodge)",
+     "match": r"\b(hotels?|motels?|hostels?|resorts?|bed and breakfast|b&b|guest ?house|serviced apartment|inns?|lodges?)\b",
      "questions": [("Best place to stay in {location} for a weekend?", "best_of"),
                    ("Affordable hotel in {location} with parking?", "price"),
                    ("Family-friendly accommodation in {location}?", "audience"),
@@ -340,7 +344,7 @@ NICHES: list[dict] = [
      "platforms": {"*": ["Booking.com", "TripAdvisor", "Expedia", "Airbnb"]},
      "fixes": [("listings", "Keep amenities (parking, pool, pets) identical across Booking.com, TripAdvisor and Google -- assistants filter on them.")]},
     {"key": "venue", "label": "Venues & entertainment", "group": "entertainment",
-     "match": r"\b(venue|function cent\w*|wedding|event space|escape room|bowling|karaoke|cinema|theatre|gallery|museum)",
+     "match": r"\b(venues?|function cent\w*|wedding (?:venue|reception)s?|reception cent\w*|event space|escape room|bowling|karaoke|cinema|theatre|gallery|museum)",
      "questions": [("Best {noun} in {location} for a birthday party?", "audience"),
                    ("Affordable {noun} in {location} for a work function?", "price"),
                    ("Which {noun} in {location} has the best reviews?", "reviews")],
@@ -348,7 +352,7 @@ NICHES: list[dict] = [
      "fixes": [("website", "Publish capacity, packages and prices -- planners ask assistants exactly these.")]},
     # ---------------- retail ----------------
     {"key": "retail", "label": "Shops", "group": "retail",
-     "match": r"\b(store|shop|boutique|florist|grocer\w*|bottle shop|liquor|pharmacy|chemist|hardware|jewell?er\w*|bookstore|gift)",
+     "match": r"\b(stores?|shops?|boutiques?|florists?|grocer\w*|bottle shop|liquor|pharmac\w*|chemists?|hardware|jewell?er\w*|bookstores?|gifts?|garden cent\w*|plant nursery)\b",
      "questions": [("Where's a good {noun} in {location} with friendly service?", "specialty"),
                    ("{noun_cap} in {location} open on Sunday?", "hours"),
                    ("Which {noun} in {location} has the best reviews?", "reviews")],
@@ -390,10 +394,17 @@ def platforms_for(niche: dict | None, country: str | None) -> list[dict]:
 
 def fill(template: str, noun: str, location: str) -> str:
     short = re.sub(r"\s+(restaurant|shop|store|service|centre|center|clinic|studio|salon)$", "", noun).strip() or noun
-    q = template.format(noun=noun, noun_short=short, noun_cap=noun[:1].upper() + noun[1:], location=location)
-    # "Emergency emergency plumber" -> "Emergency plumber"
+    # The location goes in LAST: the clean-ups below must never touch it
+    # ("Wagga Wagga" and "Walla Walla" are real places, not typos).
+    q = template.format(noun=noun, noun_short=short, noun_cap=noun[:1].upper() + noun[1:], location="\x00")
+    q = fix_grammar(q)
+    return q.replace("\x00", location)
+
+
+def fix_grammar(q: str) -> str:
+    """'Emergency emergency plumber' -> 'Emergency plumber'; 'a emergency' -> 'an emergency'."""
     q = re.sub(r"\b(\w+)\s+\1\b", r"\1", q, flags=re.I)
-    return re.sub(r"\b([Aa]) ([aeiouAEIOU])", r"\1n \2", q)  # "a emergency" -> "an emergency"
+    return re.sub(r"\b([Aa]) ([aeiouAEIOU])", r"\1n \2", q)
 
 
 def niche_questions(niche: dict | None, noun: str, location: str) -> list[tuple[str, str]]:

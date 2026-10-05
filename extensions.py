@@ -12,11 +12,11 @@ from flask_limiter.util import get_remote_address
 
 csrf = CSRFProtect()
 
-# In-memory storage (the default) only tracks limits within a single process
-# -- fine for one dev server, but with multiple Gunicorn workers in
-# production each worker would count separately, letting real limits slip.
-# Set RATELIMIT_STORAGE_URI (e.g. redis://localhost:6379) once you deploy
-# with more than one worker process.
+# In-memory storage (the default) only tracks limits within a single process.
+# The Procfile therefore runs ONE Gunicorn worker with 8 threads (the work is
+# I/O-bound: waiting on AI APIs), so every request shares the same counters.
+# Before scaling to several workers or instances, set RATELIMIT_STORAGE_URI
+# (e.g. a Render Key Value / Redis URL) so limits are shared.
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per hour"],

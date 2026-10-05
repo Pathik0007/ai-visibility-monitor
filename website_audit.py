@@ -28,18 +28,21 @@ time.
 """
 
 from __future__ import annotations
-import ipaddress
+import codecs
 import json
 import re
-import socket
-from urllib.parse import urlparse, urljoin
-from urllib.robotparser import RobotFileParser
+import time
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import requests
 
+from safe_http import UnsafeURL, check_url, fetch
+
 TIMEOUT = 8
 MAX_BYTES = 2_500_000
-MAX_REDIRECTS = 5
+PARSE_BYTES = 800_000  # the facts we look for are near the top of a page
+AUDIT_DEADLINE = 20    # seconds for the whole check (homepage + robots.txt)
 UA = "Mozilla/5.0 (compatible; AIVisibilityMonitor/1.0; website check)"
 
 SEARCH_BOTS = [  # blocking these hides you from AI/search answers
@@ -56,96 +59,137 @@ TRAINING_BOTS = [  # owner's choice; doesn't affect search answers
 ]
 
 
-class UnsafeURL(ValueError):
-    pass
-
-
 def normalize_site_url(text: str) -> str | None:
+    """'example.com.au' -> 'https://example.com.au'. None if it isn't a
+    plausible public web address. Never raises."""
     t = (text or "").strip()
-    if not t or len(t) > 500 or " " in t:
+    if not t or len(t) > 480 or any(ch.isspace() for ch in t):
         return None
     if not re.match(r"^https?://", t, re.I):
         t = "https://" + t
-    u = urlparse(t)
-    if u.scheme not in ("http", "https") or not u.hostname or "." not in u.hostname:
+    try:
+        u = urlparse(t)
+        u.port  # raises ValueError on a bad port
+    except ValueError:
+        return None
+    if u.scheme.lower() not in ("http", "https") or not u.hostname or "." not in u.hostname:
+        return None
+    if u.username is not None or u.password is not None:
         return None
     return t
 
 
 def _check_host(url: str) -> None:
-    u = urlparse(url)
-    if u.scheme not in ("http", "https"):
-        raise UnsafeURL("Only http(s) websites can be checked.")
-    port = u.port or (443 if u.scheme == "https" else 80)
-    if port not in (80, 443):
-        raise UnsafeURL("Only standard web ports can be checked.")
-    host = u.hostname or ""
-    if host.lower() in ("localhost",) or host.lower().endswith((".local", ".internal", ".localhost")):
-        raise UnsafeURL("That address isn't a public website.")
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
-        raise UnsafeURL("That website's address doesn't exist (DNS lookup failed).")
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if not ip.is_global or ip.is_multicast:
-            raise UnsafeURL("That address isn't a public website.")
+    """Kept for callers/tests: static URL checks (DNS is checked at connect)."""
+    check_url(url)
 
 
-def safe_get(url: str, accept: str = "text/html,*/*") -> tuple[requests.Response | None, str, bytes]:
+def safe_get(url: str, accept: str = "text/html,*/*", deadline: float | None = None):
     """GET with SSRF guards on every hop. Returns (response, final_url, body)."""
-    current = url
-    for _ in range(MAX_REDIRECTS + 1):
-        _check_host(current)
-        resp = requests.get(current, allow_redirects=False, timeout=TIMEOUT, stream=True,
-                            headers={"User-Agent": UA, "Accept": accept, "Accept-Language": "en"})
-        if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
-            resp.close()
-            current = urljoin(current, resp.headers["Location"])
-            continue
-        body = b""
-        for chunk in resp.iter_content(65536):
-            body += chunk
-            if len(body) > MAX_BYTES:
-                break
-        resp.close()
-        return resp, current, body
-    raise UnsafeURL("Too many redirects.")
+    return fetch(url, headers={"User-Agent": UA, "Accept": accept, "Accept-Language": "en"},
+                 max_bytes=MAX_BYTES, deadline=deadline)
 
 
-# ---------- page parsing helpers ----------
+# ---------- page parsing (linear-time: no backtracking regexes on HTML) ----------
 
-_TAG_RE = re.compile(r"<[^>]+>")
-_SCRIPT_RE = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
-_LDJSON_RE = re.compile(r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", re.S | re.I)
 _PHONE_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
 _DAY_RE = re.compile(r"\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b", re.I)
 _TIME_RE = re.compile(r"\b\d{1,2}(:\d{2})?\s?(am|pm)\b|\b\d{1,2}:\d{2}\b", re.I)
 _NON_BUSINESS_TYPES = {"website", "webpage", "breadcrumblist", "imageobject", "searchaction", "sitenavigationelement",
                        "wpheader", "wpfooter", "readaction", "listitem", "person", "videoobject", "article", "blogposting"}
+_SKIP_TAGS = {"script", "style", "noscript", "svg", "template"}
+
+
+class _Page(HTMLParser):
+    """One pass over the HTML collecting what the audit needs. Python's
+    HTMLParser is linear and tolerant of broken markup, unlike the old
+    regexes, which a hostile page could make take minutes."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.metas: list[dict] = []
+        self.title_parts: list[str] = []
+        self.text_parts: list[str] = []
+        self.ldjson: list[str] = []
+        self.script_count = 0
+        self.has_tel = False
+        self._stack: list[str] = []
+        self._in_title = False
+        self._ld = False
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v or "") for k, v in attrs if k}
+        if tag == "meta":
+            self.metas.append(a)
+        elif tag == "a" and a.get("href", "").strip().lower().startswith("tel:"):
+            self.has_tel = True
+        elif tag == "title" and not self._stack and not self.title_parts:
+            self._in_title = True  # the page title only -- not an <svg><title>
+        elif tag == "script":
+            self.script_count += 1
+            self._ld = "ld+json" in a.get("type", "").lower()
+        if tag in _SKIP_TAGS:
+            self._stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        if tag in _SKIP_TAGS and tag in self._stack:
+            while self._stack and self._stack.pop() != tag:
+                pass
+            if tag == "script":
+                self._ld = False
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title_parts.append(data)
+        elif self._stack:
+            if self._stack[-1] == "script" and self._ld:
+                self.ldjson.append(data)
+        else:
+            self.text_parts.append(data)
+
+    def meta(self, name: str) -> str | None:
+        name = name.lower()
+        for m in self.metas:
+            if (m.get("name") or m.get("property") or "").strip().lower() == name and "content" in m:
+                return m["content"].strip()
+        return None
+
+    @property
+    def title(self) -> str:
+        return re.sub(r"\s+", " ", "".join(self.title_parts)).strip()
+
+    @property
+    def text(self) -> str:
+        return re.sub(r"\s+", " ", " ".join(self.text_parts)).strip()
+
+
+def parse_page(html: str) -> _Page:
+    page = _Page()
+    try:
+        page.feed(html[:PARSE_BYTES])
+        page.close()
+    except Exception:
+        pass  # whatever was collected before the parser gave up is still useful
+    return page
 
 
 def _meta(html: str, name: str) -> str | None:
-    n = re.escape(name)
-    m = re.search(r"<meta[^>]+(?:name|property)=[\"']?%s[\"']?[^>]*content=(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))" % n, html, re.I) \
-        or re.search(r"<meta[^>]+content=(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))[^>]*(?:name|property)=[\"']?%s\b" % n, html, re.I)
-    if not m:
-        return None
-    return next((g for g in m.groups() if g is not None), "").strip()
+    return parse_page(html).meta(name)
 
 
 def _visible_text(html: str) -> str:
-    text = _SCRIPT_RE.sub(" ", html)
-    text = _TAG_RE.sub(" ", text)
-    text = re.sub(r"&nbsp;|&#160;", " ", text)
-    text = re.sub(r"&amp;", "&", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return parse_page(html).text
 
 
-def _jsonld_types(html: str) -> tuple[list[str], list[dict]]:
+def _jsonld_types(page_or_html) -> tuple[list[str], list[dict]]:
+    page = page_or_html if isinstance(page_or_html, _Page) else parse_page(page_or_html)
     types, objs = [], []
 
-    def walk(o):
+    def walk(o, depth=0):
+        if depth > 30:
+            return
         if isinstance(o, dict):
             t = o.get("@type")
             for x in (t if isinstance(t, list) else [t]):
@@ -153,17 +197,104 @@ def _jsonld_types(html: str) -> tuple[list[str], list[dict]]:
                     types.append(x)
                     objs.append(o)
             for v in o.values():
-                walk(v)
+                walk(v, depth + 1)
         elif isinstance(o, list):
             for v in o:
-                walk(v)
+                walk(v, depth + 1)
 
-    for raw in _LDJSON_RE.findall(html):
+    for raw in page.ldjson:
         try:
             walk(json.loads(raw.strip()))
         except Exception:
             continue
     return types, objs
+
+
+def _decode(body: bytes, resp) -> str:
+    """Charset from the header only if it was really sent, else <meta
+    charset>, else UTF-8 (requests defaults text/html to ISO-8859-1, which
+    turned 'Café' into 'CafÃ©' and failed the name check)."""
+    candidates = []
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    m = re.search(r"charset=[\"']?([\w.:-]{1,40})", ctype)
+    if m:
+        candidates.append(m.group(1))
+    m = re.search(rb"<meta[^>]{0,200}?charset=[\"']?([\w.:-]{1,40})", body[:4096], re.I)
+    if m:
+        candidates.append(m.group(1).decode("ascii", "ignore"))
+    for enc in candidates + ["utf-8"]:
+        try:
+            codecs.lookup(enc)
+            return body.decode(enc, errors="replace")
+        except (LookupError, TypeError):
+            continue
+    return body.decode("utf-8", errors="replace")
+
+
+# ---------- robots.txt (RFC 9309, as Google / OpenAI / Anthropic apply it) ----------
+
+def _robots_groups(text: str) -> list[tuple[list[str], list[tuple[bool, str]]]]:
+    groups: list[tuple[list[str], list[tuple[bool, str]]]] = []
+    agents: list[str] = []
+    rules: list[tuple[bool, str]] = []
+    last_was_agent = False
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" not in line:
+            continue
+        key, val = (x.strip() for x in line.split(":", 1))
+        key = key.lower()
+        if key == "user-agent":
+            if not last_was_agent and (agents or rules):
+                groups.append((agents, rules))
+                agents, rules = [], []
+            agents.append(val.lower())
+            last_was_agent = True
+        elif key in ("allow", "disallow"):
+            last_was_agent = False
+            if agents and val and len(rules) < 2000:
+                rules.append((key == "allow", val))
+        # Other lines (Crawl-delay, Sitemap...) don't end a group of
+        # User-agent lines -- only a rule does (as Google parses it).
+    if agents:
+        groups.append((agents, rules))
+    return groups
+
+
+def _rule_matches(pattern: str, path: str) -> bool:
+    """Wildcard match in O(len(pattern) x len(path)) -- no regex: a hostile
+    robots.txt full of '*' made the old regex backtrack for minutes."""
+    anchored = pattern.endswith("$")
+    pat = re.sub(r"\*+", "*", pattern[:-1] if anchored else pattern)[:500]
+    path = path[:2000]
+    n = len(path)
+    positions = {0}
+    for ch in pat:
+        if ch == "*":
+            positions = set(range(min(positions), n + 1))
+        else:
+            positions = {p + 1 for p in positions if p < n and path[p] == ch}
+        if not positions:
+            return False
+    return (n in positions) if anchored else True
+
+
+def robots_allows(robots_text: str, bot: str, path: str) -> bool:
+    """Exact (case-insensitive) user-agent token match, all matching groups
+    merged, falling back to '*'; longest matching rule wins; Allow wins a
+    tie; '*' and '$' wildcards supported."""
+    groups = _robots_groups((robots_text or "").lstrip("\ufeff"))
+    token = bot.lower()
+    rules = [r for agents, rs in groups if token in agents for r in rs]
+    if not any(token in agents for agents, _ in groups):
+        rules = [r for agents, rs in groups if "*" in agents for r in rs]
+    best_len, allowed = -1, True
+    for allow, pattern in rules:
+        if _rule_matches(pattern, path):
+            length = len(pattern)
+            if length > best_len or (length == best_len and allow):
+                best_len, allowed = length, allow
+    return allowed
 
 
 # ---------- the audit ----------
@@ -175,13 +306,25 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
     if not url:
         return {"ok": False, "url": url_text, "error": "That doesn't look like a website address."}
     try:
-        resp, final_url, body = safe_get(url)
+        return _audit(url, business, location, category)
+    except Exception:  # a parsing surprise must never break the whole report
+        return {"ok": False, "url": url, "error": "Couldn't analyse that website."}
+
+
+def _audit(url: str, business: str, location: str, category: str) -> dict:
+    deadline = time.monotonic() + AUDIT_DEADLINE
+    try:
+        resp, final_url, body = safe_get(url, deadline=deadline)
     except UnsafeURL as exc:
         return {"ok": False, "url": url, "error": str(exc)}
     except requests.exceptions.SSLError:
         return {"ok": False, "url": url, "error": "The website's security certificate is broken -- browsers and AI crawlers will warn or refuse."}
     except requests.exceptions.Timeout:
-        return {"ok": False, "url": url, "error": "The website took too long to respond (over 8 seconds)."}
+        return {"ok": False, "url": url, "error": "The website took too long to respond."}
+    except requests.exceptions.ConnectionError as exc:
+        if "NameResolution" in repr(exc) or "getaddrinfo" in repr(exc):
+            return {"ok": False, "url": url, "error": "That website's address doesn't exist (DNS lookup failed)."}
+        return {"ok": False, "url": url, "error": "Couldn't reach the website."}
     except Exception:
         return {"ok": False, "url": url, "error": "Couldn't reach the website."}
 
@@ -198,8 +341,9 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
     if status != 200:
         return _finish(url, final_url, checks)
 
-    html = body.decode(resp.encoding or "utf-8", errors="replace")
-    text = _visible_text(html)
+    html = _decode(body, resp)
+    page = parse_page(html)
+    text = page.text
     low_text = text.lower()
     words = len(text.split())
 
@@ -207,7 +351,7 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
         "Served over HTTPS." if final_url.lower().startswith("https://") else "Served over plain HTTP.",
         "Turn on HTTPS (most hosts offer it free).", 4)
 
-    robots_meta = (_meta(html, "robots") or "").lower()
+    robots_meta = ((page.meta("robots") or "") + " " + (page.meta("googlebot") or "")).lower()
     x_robots = (resp.headers.get("X-Robots-Tag") or "").lower()
     noindex = "noindex" in robots_meta or "noindex" in x_robots
     add("indexable", "Not hidden from search", not noindex,
@@ -217,38 +361,45 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
     # robots.txt
     parsed = urlparse(final_url)
     root = f"{parsed.scheme}://{parsed.netloc}"
-    blocked_search, blocked_training, robots_found = [], [], False
+    blocked_search, blocked_training, robots_state = [], [], "missing"
+    path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
     try:
-        r_resp, _, r_body = safe_get(root + "/robots.txt", accept="text/plain,*/*")
-        if r_resp is not None and r_resp.status_code == 200 and len(r_body) < 500_000:
-            robots_found = True
-            rp = RobotFileParser()
-            rp.parse(r_body.decode("utf-8", errors="replace").splitlines())
+        r_resp, _, r_body = safe_get(root + "/robots.txt", accept="text/plain,*/*", deadline=deadline)
+        if r_resp.status_code == 200:
+            robots_state = "found"
+            robots_text = r_body[:500_000].decode("utf-8-sig", errors="replace")
             for bot, what in SEARCH_BOTS:
-                if not rp.can_fetch(bot, final_url):
+                if not robots_allows(robots_text, bot, path):
                     blocked_search.append(f"{bot} ({what})")
             for bot, what in TRAINING_BOTS:
-                if not rp.can_fetch(bot, final_url):
+                if not robots_allows(robots_text, bot, path):
                     blocked_training.append(f"{bot} ({what})")
+        elif r_resp.status_code >= 500 or r_resp.status_code == 429:
+            robots_state = "error"  # crawlers treat a failing robots.txt as "keep out"
     except Exception:
-        pass
-    add("ai_crawlers", "AI search crawlers allowed", not blocked_search,
-        ("Blocked in robots.txt: " + ", ".join(blocked_search)) if blocked_search
-        else ("robots.txt allows the AI search crawlers." if robots_found else "No robots.txt -- everything is allowed."),
-        "Allow these in robots.txt -- while blocked, those assistants can't show or cite your site.", 10)
+        robots_state = "error"
+    if robots_state == "error":
+        add("ai_crawlers", "AI search crawlers allowed", False,
+            "robots.txt couldn't be read (server error or timeout). Google and other crawlers treat that as "
+            "\u201cdon't crawl\u201d until it works again.",
+            "Make sure yoursite/robots.txt loads (a 404 is fine; an error is not).", 10, status="warn")
+    else:
+        add("ai_crawlers", "AI search crawlers allowed", not blocked_search,
+            ("Blocked in robots.txt: " + ", ".join(blocked_search)) if blocked_search
+            else ("robots.txt allows the AI search crawlers." if robots_state == "found" else "No robots.txt -- everything is allowed."),
+            "Allow these in robots.txt -- while blocked, those assistants can't show or cite your site.", 10)
     if blocked_training:
         add("training_crawlers", "AI training crawlers", True,
             "Blocked (your choice -- doesn't affect search answers): " + ", ".join(blocked_training), "", 0, status="info")
 
-    title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
-    title = re.sub(r"\s+", " ", _TAG_RE.sub("", title_m.group(1))).strip() if title_m else ""
+    title = page.title
     from ai_visibility.analyzer import _search, _normalize  # same forgiving name matching as answers
     name_in_title = bool(business) and _search(_normalize(title), business) is not None
     add("title", "Page title names the business", bool(title) and (name_in_title or not business),
         f"Title: “{title[:90]}”" if title else "No <title> tag.",
         f"Use a title like “{business or 'Business name'} | {category or 'what you do'} in {location or 'your suburb'}”.", 5)
 
-    desc = _meta(html, "description") or _meta(html, "og:description")
+    desc = page.meta("description") or page.meta("og:description")
     add("description", "Meta description", bool(desc),
         f"“{desc[:110]}”" if desc else "No meta description.",
         "Add a one-sentence description: what you do, where, and what makes you different.", 2)
@@ -274,12 +425,12 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
             "The page describes your type of business." if does else f"Words like “{category}” don't appear on the homepage.",
             f"Describe your services in plain words customers use (“{category}”), ideally a section per main service.", 6)
 
-    has_tel = "tel:" in html.lower() or bool(_PHONE_RE.search(text))
+    has_tel = page.has_tel or bool(_PHONE_RE.search(text))
     add("phone", "Phone number visible", has_tel,
         "Phone number found." if has_tel else "No phone number found on the homepage.",
         "Show your phone number as text with a tap-to-call link.", 5)
 
-    types, objs = _jsonld_types(html)
+    types, objs = _jsonld_types(page)
     business_types = [t for t in types if t.lower() not in _NON_BUSINESS_TYPES]
     hours_schema = any(("openingHours" in o or "openingHoursSpecification" in o) for o in objs)
     hours_text = len(_DAY_RE.findall(text)) >= 2 and bool(_TIME_RE.search(text))
@@ -295,7 +446,7 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
         "Not required, but it helps assistants confirm your details.", 4,
         status=None if lb else ("warn" if business_types else "fail"))
 
-    js_heavy = words < 120 and html.lower().count("<script") >= 5
+    js_heavy = words < 120 and page.script_count >= 5
     add("content", "Enough readable text", words >= 150,
         f"About {words} words of readable text." + (" Most content seems to load via JavaScript, which many AI crawlers don't run." if js_heavy else ""),
         "Add a few paragraphs of real text: services, area, prices, FAQs. Many AI crawlers don't run JavaScript, so text must be in the HTML.", 6)
@@ -306,7 +457,7 @@ def audit_website(url_text: str, business: str = "", location: str = "", categor
         "Add an FAQ answering what customers ask (prices, hours, areas, urgent jobs) -- assistants quote these answers.", 3,
         status=None if faq else "warn")
 
-    viewport = bool(re.search(r"<meta[^>]+name=[\"']?viewport", html, re.I))
+    viewport = page.meta("viewport") is not None
     add("mobile", "Mobile-friendly setup", viewport, "Viewport tag present." if viewport else "No mobile viewport tag.",
         "Add a responsive viewport tag / mobile-friendly theme.", 2)
 

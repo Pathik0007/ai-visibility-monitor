@@ -43,7 +43,8 @@ def get(report_id: str) -> dict | None:
     if row is None:
         return None
     if datetime.utcnow() - row.created_at > _TTL:
-        db.session.delete(row)
+        # Bulk delete: a concurrent request may already have removed it.
+        db.session.query(AnonymousReport).filter_by(id=report_id).delete(synchronize_session=False)
         db.session.commit()
         return None
     return {

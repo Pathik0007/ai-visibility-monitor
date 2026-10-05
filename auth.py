@@ -1,4 +1,5 @@
 import re
+from sqlalchemy.exc import IntegrityError
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required
 from models import db, User
@@ -34,7 +35,12 @@ def signup():
         user = User(email=email, subscription_status="inactive")
         user.set_password(password)
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:  # same email submitted twice at once
+            db.session.rollback()
+            flash("An account with that email already exists.")
+            return render_template("signup.html")
 
         login_user(user)
         return redirect(url_for("dashboard"))

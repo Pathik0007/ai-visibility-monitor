@@ -26,7 +26,11 @@ import re
 import logging
 from urllib.parse import urlparse, parse_qs, unquote_plus, urljoin
 
+import time
+
 import requests
+
+import safe_http
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +43,23 @@ _GOOGLE_HOST_RE = re.compile(r"^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2}|com?\.[
 
 
 def is_google_host(host: str) -> bool:
-    host = (host or "").lower().split(":")[0]
+    """`host` must be a bare hostname (urlparse(...).hostname). A netloc
+    such as "maps.google.com:@169.254.169.254" is rejected: the part before
+    "@" is a username, and the real host is the address after it."""
+    host = (host or "").lower().rstrip(".")
+    if "@" in host or ":" in host:
+        return False
     return host in _SHORT_HOSTS or bool(_GOOGLE_HOST_RE.match(host))
+
+
+def is_google_url(url: str) -> bool:
+    try:
+        u = urlparse(url)
+        port = u.port
+    except ValueError:
+        return False
+    return (u.scheme in ("http", "https") and u.username is None and u.password is None
+            and "@" not in u.netloc and port in (None, 80, 443) and is_google_host(u.hostname or ""))
 
 
 def looks_like_link(text: str) -> bool:
@@ -54,10 +73,7 @@ def normalize_url(text: str) -> str | None:
         return None
     if not re.match(r"^https?://", t, re.I):
         t = "https://" + t
-    u = urlparse(t)
-    if u.scheme not in ("http", "https") or not is_google_host(u.netloc):
-        return None
-    return t
+    return t if is_google_url(t) else None
 
 
 def expand(url: str) -> str:
@@ -65,21 +81,25 @@ def expand(url: str) -> str:
     current = url
     for _ in range(MAX_REDIRECTS):
         u = urlparse(current)
-        if u.netloc.lower().startswith("consent.google."):
+        if (u.hostname or "").startswith("consent.google."):
             cont = parse_qs(u.query).get("continue", [None])[0]
-            if cont and is_google_host(urlparse(cont).netloc):
+            if cont and is_google_url(cont):
                 current = cont
                 continue
             break
         if _parse(current).get("name") or _parse(current).get("place_id"):
             return current  # already informative, no need to fetch
-        resp = requests.get(current, allow_redirects=False, timeout=TIMEOUT, stream=True,
-                            headers={"User-Agent": _UA, "Accept-Language": "en"})
-        resp.close()
+        if not is_google_url(current):
+            raise ValueError("That link redirects outside Google.")
+        # One hop at a time through the SSRF-guarded client (public IPs only,
+        # resolved once at connect time).
+        resp, _final, _ = safe_http.fetch(current, headers={"User-Agent": _UA, "Accept-Language": "en"},
+                                          max_redirects=0, read_body=False,
+                                          deadline=time.monotonic() + TIMEOUT + 1)
         loc = resp.headers.get("Location")
         if resp.status_code in (301, 302, 303, 307, 308) and loc:
             nxt = urljoin(current, loc)
-            if not is_google_host(urlparse(nxt).netloc):
+            if not is_google_url(nxt):
                 raise ValueError("That link redirects outside Google.")
             current = nxt
             continue
@@ -126,7 +146,7 @@ def _parse(url: str) -> dict:
     if m:
         out["lat"], out["lon"] = float(m.group(1)), float(m.group(2))
     # g.page/<business-slug> -- the slug is the name when nothing better exists
-    if u.netloc.lower() == "g.page" and "name" not in out:
+    if (u.hostname or "") == "g.page" and "name" not in out:
         slug = path.strip("/").split("/")[0]
         if slug and not slug.startswith("r/"):
             out["slug"] = slug.replace("-", " ")
@@ -216,8 +236,8 @@ def _free_lookup(info: dict) -> dict:
     name = info.get("name") or info.get("text") or ""
     result = {"name": name, "category": "", "location": "", "full_address": "", "source": "link",
               "lat": info.get("lat"), "lon": info.get("lon"), "country": None}
-    if info.get("address"):
-        result["full_address"] = info["address"]
+    if (info.get("address") or "").strip(" ,"):
+        result["full_address"] = info["address"].strip(" ,")
     if info.get("lat") is not None:
         try:
             rev = _osm_reverse(info["lat"], info["lon"])
@@ -241,7 +261,8 @@ def _free_lookup(info: dict) -> dict:
         if len(parts) >= 2 and re.fullmatch(r"[A-Za-z .]+", parts[-1]) and len(parts[-1].split()) <= 3 \
                 and not re.search(r"\b[A-Z]{2,3}\b", parts[-1]):
             parts = parts[:-1]  # drop a trailing country ("Australia")
-        result["location"] = re.sub(r"\s+\d{3,5}$", "", parts[-1]).strip()
+        if parts:
+            result["location"] = re.sub(r"\s+\d{3,5}$", "", parts[-1]).strip()
     if not result["location"] and info.get("place"):
         result["location"] = info["place"]
     return result
@@ -250,11 +271,21 @@ def _free_lookup(info: dict) -> dict:
 def resolve_link(text: str) -> dict:
     """Returns {"ok": True, name, category, location, ...} or
     {"ok": False, "error": "..."}. Never raises."""
+    try:
+        return _resolve_link(text)
+    except Exception:
+        logger.exception("resolve_link failed")
+        return {"ok": False, "error": "Couldn't read that link -- type the business name instead."}
+
+
+def _resolve_link(text: str) -> dict:
     url = normalize_url(text)
     if not url:
         return {"ok": False, "error": "That isn't a Google Maps link. In Google Maps, open the business, tap Share, then Copy link."}
     try:
         final = expand(url)
+    except safe_http.UnsafeURL:
+        return {"ok": False, "error": "That link can't be opened."}
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:

@@ -8,3 +8,4 @@ flask-wtf==1.3.0
 flask-limiter==4.1.1
 stripe==15.6.1
 apscheduler==3.11.3
+urllib3==2.6.3  # read1() + decompression-bomb limits used by safe_http.py

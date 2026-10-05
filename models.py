@@ -30,7 +30,14 @@ class User(db.Model, UserMixin):
 
     @property
     def is_subscribed(self) -> bool:
-        return self.subscription_status in ("active", "demo")
+        """Paid ("active"), complimentary (owner/test accounts listed in
+        COMPLIMENTARY_EMAILS), or "demo" -- but demo only while every AI
+        provider still runs on free sample answers. Once real (metered) keys
+        are live, old demo accounts stop running paid checks."""
+        from plans import is_complimentary, demo_subscriptions_allowed
+        if self.subscription_status == "active" or is_complimentary(self.email):
+            return True
+        return self.subscription_status == "demo" and demo_subscriptions_allowed()
 
 
 class Business(db.Model):
@@ -41,8 +48,8 @@ class Business(db.Model):
     location = db.Column(db.String(255), nullable=False)
     competitors = db.Column(db.Text, default="")
     custom_questions = db.Column(db.Text, default="")  # Pro: one question per line
-    competitor_meta = db.Column(db.Text, default="{}")
-    website = db.Column(db.String(500), default="")  # optional; checked for AI-readiness each run  # {competitor name: category}, for mismatch checks
+    competitor_meta = db.Column(db.Text, default="{}")  # {competitor name: category}, for mismatch checks
+    website = db.Column(db.String(500), default="")  # optional; checked for AI-readiness each run
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     runs = db.relationship(
@@ -146,6 +153,7 @@ def add_missing_columns() -> None:
         "business": [("custom_questions", "TEXT DEFAULT ''"), ("competitor_meta", "TEXT DEFAULT '{}'"), ("website", "VARCHAR(500) DEFAULT ''")],
     }
     insp = inspect(db.engine)
+    pg = db.engine.dialect.name == "postgresql"
     for table, cols in wanted.items():
         if not insp.has_table(table):
             continue
@@ -153,5 +161,16 @@ def add_missing_columns() -> None:
         for name, ddl in cols:
             if name not in existing:
                 quoted = f'"{table}"'  # "user" is a reserved word in Postgres
-                db.session.execute(text(f"ALTER TABLE {quoted} ADD COLUMN {name} {ddl}"))
+                guard = "IF NOT EXISTS " if pg else ""
+                db.session.execute(text(f"ALTER TABLE {quoted} ADD COLUMN {guard}{name} {ddl}"))
     db.session.commit()
+
+
+def init_schema() -> None:
+    """create_all + forward migration, serialised across processes: two
+    Gunicorn workers booting at once on Postgres would otherwise race on
+    CREATE TABLE / ALTER TABLE and crash the deploy."""
+    from locks import exclusive
+    with exclusive(db, "schema-migration", wait=True):
+        db.create_all()
+        add_missing_columns()

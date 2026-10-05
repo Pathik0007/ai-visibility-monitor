@@ -1,5 +1,4 @@
-import requests
-from .base import BaseProvider, NotConfiguredError, PROVIDER_TIMEOUT, http_error, make_source, dedupe_sources
+from .base import BaseProvider, NotConfiguredError, http_error, make_source, dedupe_sources, post_json, require_answer
 
 
 class PerplexityProvider(BaseProvider):
@@ -24,15 +23,15 @@ class PerplexityProvider(BaseProvider):
             if context.get("region"):
                 loc["region"] = context["region"]
             body["web_search_options"] = {"user_location": loc}
-        resp = requests.post(
+        resp = post_json(
             "https://api.perplexity.ai/chat/completions",
             headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
-            json=body,
-            timeout=PROVIDER_TIMEOUT,
+            body=body, provider="Perplexity", context=context,
         )
         if resp.status_code != 200:
             raise http_error(resp, "Perplexity")
         data = resp.json()
-        sources = [make_source(r.get("url"), r.get("title")) for r in data.get("search_results") or []]
+        sources = [make_source(r.get("url"), r.get("title")) for r in data.get("search_results") or [] if isinstance(r, dict)]
         sources += [make_source(u) for u in data.get("citations") or [] if isinstance(u, str)]
-        return {"text": data["choices"][0]["message"]["content"], "sources": dedupe_sources(sources)}
+        text = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+        return {"text": require_answer(text, "Perplexity"), "sources": dedupe_sources(sources)}

@@ -18,6 +18,8 @@ Why Pro is worth $20 more (and costs more to run):
 
 from __future__ import annotations
 
+import os
+
 PLANS: dict[str, dict] = {
     "starter": {
         "key": "starter", "name": "Starter", "price": 29,
@@ -36,9 +38,25 @@ PLANS: dict[str, dict] = {
 FREE_CHECK = {"questions_options": [4, 6], "competitors": 5}
 
 
+def is_complimentary(email: str | None) -> bool:
+    """Owner / test accounts that get Pro without paying, e.g. to demo the
+    product to buyers. Comma-separated COMPLIMENTARY_EMAILS env var."""
+    allowed = {e.strip().lower() for e in os.environ.get("COMPLIMENTARY_EMAILS", "").split(",") if e.strip()}
+    return bool(email) and email.strip().lower() in allowed
+
+
+def demo_subscriptions_allowed() -> bool:
+    """Free "demo" plans are only safe while every AI provider is on sample
+    answers -- with real keys each check costs money."""
+    from ai_visibility.providers import ALL_PROVIDERS
+    return not any(p.is_configured() for p in ALL_PROVIDERS)
+
+
 def plan_for(user) -> dict | None:
     if not user or not getattr(user, "is_subscribed", False):
         return None
+    if getattr(user, "subscription_status", None) != "active" and is_complimentary(getattr(user, "email", None)):
+        return PLANS["pro"]
     return PLANS.get(getattr(user, "plan", None) or "starter", PLANS["starter"])
 
 

@@ -8,13 +8,14 @@ is fully testable without a real Stripe account. Add real keys to go live.
 
 import os
 import stripe
-from flask import Blueprint, redirect, url_for, flash, request
+from flask import Blueprint, redirect, url_for, flash, request, current_app
 from flask_login import login_required, current_user
 from models import db
+from extensions import limiter
 
 billing_bp = Blueprint("billing", __name__, url_prefix="/billing")
 
-IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
+IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production" or bool(os.environ.get("RENDER"))
 
 # One Stripe recurring price per plan (see plans.py).
 PRICE_ENV = {"starter": "STRIPE_PRICE_ID", "pro": "STRIPE_PRICE_ID_PRO"}
@@ -29,6 +30,17 @@ def _plan_for_price(price_id: str | None) -> str | None:
         if price_id and os.environ.get(env) == price_id:
             return plan
     return None
+
+
+def _plain(obj) -> dict:
+    """Stripe >= 13 returns StripeObject instances that are NOT dicts (.get()
+    raises AttributeError). Convert once at the boundary and use plain dicts."""
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    to_dict = getattr(obj, "to_dict", None)
+    return to_dict() if callable(to_dict) else {}
 
 
 def _stripe_configured(plan: str = "starter") -> bool:
@@ -108,18 +120,43 @@ def portal():
 @billing_bp.route("/success")
 @login_required
 def success():
+    """Activates the plan only after Stripe confirms the checkout was paid and
+    the subscription is live. The session id comes from the URL, so it must
+    never be trusted on its own (an abandoned or replayed checkout session
+    would otherwise unlock a paid plan for free). The webhook below is the
+    source of truth; this just saves the user waiting for it."""
     from plans import valid_plan
-    session_id = request.args.get("session_id")
-    if os.environ.get("STRIPE_SECRET_KEY") and session_id:
-        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-        session = stripe.checkout.Session.retrieve(session_id)
-        if session.customer == current_user.stripe_customer_id:
-            current_user.subscription_status = "active"
-            current_user.stripe_subscription_id = session.subscription
-            current_user.plan = valid_plan((session.metadata or {}).get("plan"))
-            db.session.commit()
-            flash("Subscription active -- you can now add businesses to monitor.")
+    session_id = (request.args.get("session_id") or "").strip()
+    if not (os.environ.get("STRIPE_SECRET_KEY") and session_id.startswith("cs_") and current_user.stripe_customer_id):
+        return redirect(url_for("dashboard"))
+    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+    try:
+        session = _plain(stripe.checkout.Session.retrieve(session_id))
+        if session.get("customer") != current_user.stripe_customer_id or session.get("mode") != "subscription":
+            return redirect(url_for("dashboard"))
+        if session.get("status") != "complete" or session.get("payment_status") not in ("paid", "no_payment_required"):
+            flash("Your payment hasn't gone through yet -- we'll activate your plan as soon as Stripe confirms it.")
+            return redirect(url_for("dashboard"))
+        sub_id = session.get("subscription")
+        sub = _plain(stripe.Subscription.retrieve(sub_id)) if sub_id else {}
+    except Exception:
+        current_app.logger.exception("Stripe checkout confirmation failed")
+        flash("We couldn't confirm your payment just now -- it will activate automatically within a minute.")
+        return redirect(url_for("dashboard"))
+
+    if sub.get("status") in ("active", "trialing"):
+        current_user.subscription_status = "active"
+        current_user.stripe_subscription_id = sub_id
+        current_user.plan = _plan_from_subscription(sub) or valid_plan(_plain(session.get("metadata")).get("plan"))
+        db.session.commit()
+        flash("Subscription active -- you can now add businesses to monitor.")
     return redirect(url_for("dashboard"))
+
+
+def _plan_from_subscription(sub: dict) -> str | None:
+    items = (_plain(sub.get("items")).get("data") or [])
+    price = _plain(items[0]).get("price") if items else None
+    return _plan_for_price(_plain(price).get("id"))
 
 
 @billing_bp.route("/cancel")
@@ -130,38 +167,57 @@ def cancel():
 
 
 @billing_bp.route("/webhook", methods=["POST"])
+@limiter.exempt  # Stripe sends from a few IPs; never throttle billing events
 def webhook():
     """Real production path: Stripe calls this on subscription lifecycle events.
     Keeps subscription_status in sync even if the user closes the tab after
-    paying, or cancels/lapses later. No-ops harmlessly if Stripe isn't configured."""
+    paying, or cancels/lapses later. No-ops harmlessly if Stripe isn't configured.
+
+    Stripe doesn't guarantee delivery order, so the event body is only used to
+    find the subscription; its CURRENT state is re-fetched from Stripe. Events
+    about an older subscription never overwrite the user's current one."""
     if not os.environ.get("STRIPE_SECRET_KEY"):
         return "", 200
+    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
-    payload = request.data
+    payload = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
     webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-
+    if not webhook_secret:
+        return "", 400
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except Exception:
         return "", 400
 
-    obj = event["data"]["object"]
-    customer_id = obj.get("customer")
-    user = None
-    if customer_id:
-        from models import User
-        user = User.query.filter_by(stripe_customer_id=customer_id).first()
+    etype = event["type"]
+    if not etype.startswith("customer.subscription."):
+        return "", 200
+    obj = _plain(event["data"]["object"])
+    customer_id, sub_id = obj.get("customer"), obj.get("id")
+    if not (customer_id and sub_id):
+        return "", 200
 
-    if user:
-        if event["type"] in ("customer.subscription.deleted",):
-            user.subscription_status = "inactive"
-        elif event["type"] in ("customer.subscription.updated", "customer.subscription.created"):
-            user.subscription_status = "active" if obj.get("status") in ("active", "trialing") else "inactive"
-            items = ((obj.get("items") or {}).get("data") or [])
-            plan = _plan_for_price(((items[0].get("price") or {}).get("id")) if items else None)
-            if plan:
-                user.plan = plan  # plan switches made in the billing portal
-        db.session.commit()
+    from models import User
+    user = User.query.filter_by(stripe_customer_id=customer_id).first()
+    if not user:
+        return "", 200
+    if user.stripe_subscription_id and user.stripe_subscription_id != sub_id:
+        # An event about a different (older) subscription. Only let a NEW
+        # live subscription replace the stored one.
+        if user.subscription_status == "active" or etype == "customer.subscription.deleted":
+            return "", 200
 
+    try:
+        sub = _plain(stripe.Subscription.retrieve(sub_id))
+    except Exception:
+        current_app.logger.exception("Stripe subscription fetch failed")
+        return "", 500  # Stripe retries later
+    status = sub.get("status") or obj.get("status")
+    user.stripe_subscription_id = sub_id
+    user.subscription_status = "active" if status in ("active", "trialing") else "inactive"
+    plan = _plan_from_subscription(sub)
+    if plan:
+        user.plan = plan  # plan switches made in the billing portal
+    db.session.commit()
     return "", 200

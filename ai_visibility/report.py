@@ -4,7 +4,8 @@ business owner actually reads: one score, a breakdown, and a fix list.
 """
 
 from __future__ import annotations
-from collections import Counter, OrderedDict
+from collections import OrderedDict
+from .analyzer import names_match
 from .solutions import build_action_plan
 
 FIX_LIBRARY = [
@@ -72,19 +73,26 @@ def build_report(business: str, category: str, competitors: list[str], results: 
         if r["mentioned"]:
             e["mentioned"] += 1
 
-    # Counted once per answer and merged case-insensitively ("Joe's Fish Bar"
-    # and "joe's fish bar" in one answer used to count as two mentions).
-    competitor_counts = Counter()
-    display_name: dict[str, str] = {}
+    # Counted once per answer and merged across spelling variants with the
+    # same forgiving matcher used on answers: "Kickin' Inn" / "Kickin'Inn" /
+    # "kickin' inn" are one business (counted separately they picked the
+    # wrong leader and fired false "new top competitor" alerts).
+    entries: list[dict] = []
     for r in scoreable:
-        keys = set()
-        for name in r["competitors_mentioned"]:
-            key = name.strip().lower()
-            if key and key != business.lower():
-                keys.add(key)
-                display_name.setdefault(key, name.strip())
-        competitor_counts.update(keys)
-    top_competitors = [(display_name[k], n) for k, n in competitor_counts.most_common(5)]
+        seen_here: set[int] = set()
+        for name in (n.strip() for n in r["competitors_mentioned"]):
+            if not name or names_match(name, business):
+                continue
+            idx = next((i for i, e in enumerate(entries) if names_match(name, e["name"])), None)
+            if idx is None:
+                entries.append({"name": name, "count": 0})
+                idx = len(entries) - 1
+            if idx in seen_here:
+                continue
+            seen_here.add(idx)
+            entries[idx]["count"] += 1
+    entries.sort(key=lambda e: -e["count"])  # stable: first-seen wins ties
+    top_competitors = [(e["name"], e["count"]) for e in entries[:5]]
 
     recommendations = _build_recommendations(
         mention_rate=mention_rate,
@@ -139,6 +147,11 @@ def _build_recommendations(mention_rate, avg_position, by_engine, top_competitor
             "above -- results may be incomplete. Try again shortly."
         )
 
+    answered = total_count - error_count
+    if answered <= 0:
+        return ["No assistant could be reached for this check, so there's no score yet -- "
+                "please try again in a few minutes."]
+
     if mention_rate < 0.5:
         recs.append(FIX_LIBRARY[0]["text"])
 
@@ -152,9 +165,10 @@ def _build_recommendations(mention_rate, avg_position, by_engine, top_competitor
     engine_rates = {
         name: (stats["mentioned"] / stats["total"] if stats["total"] else 0)
         for name, stats in by_engine.items()
+        if stats["total"]  # an engine whose every call failed tells us nothing
     }
     weak_engines = [name for name, rate in engine_rates.items() if rate < mention_rate - 0.25]
-    if weak_engines and len(by_engine) > 1:
+    if weak_engines and len(engine_rates) > 1:
         recs.append(FIX_LIBRARY[3]["text"].format(engines=", ".join(weak_engines)))
 
     if not recs:

@@ -1,611 +1,185 @@
 # AI Visibility Monitor
 
-Checks whether ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend a
-local business (or a competitor) for realistic "best X near me" questions,
-turns that into a visibility score and a plain-English fix list, and -- for
-subscribed accounts -- re-checks automatically every week and emails an
-alert when something meaningful changes.
+[![CI](https://github.com/Pathik0007/ai-visibility-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/Pathik0007/ai-visibility-monitor/actions/workflows/ci.yml)
 
-## Run it
+**Do ChatGPT, Claude, Perplexity, Gemini and DeepSeek recommend your business?**
+AI Visibility Monitor asks them the questions your customers ask ("best
+dentist in Ryde for nervous patients?"), shows who they recommend instead,
+where they got their information, and what to fix. It covers your Google
+profile, your reviews and your website. Subscribers get automatic re-checks
+and an email when something changes.
 
-```bash
-pip install -r requirements.txt
-cp .env.example .env      # optional, see below
-python app.py
+**Live app:** <https://YOUR-RENDER-APP.onrender.com>, deployed on Render with Postgres.
+
+---
+
+## What a business owner gets
+
+- **A visibility score across 5 assistants.** Each one is asked 6–15
+  realistic, niche-specific questions, located where the customer is.
+- **Who is recommended instead**, what each assistant said about them, and
+  the web pages it read to decide.
+- **An action plan for each foundation:** Google/Bing/Apple listings,
+  reviews, and the website. Each step is tied to the exact question where
+  the business was missed.
+- **A website AI-readiness check.** Can AI search crawlers reach the site?
+  Is the business name, suburb, phone and opening hours in plain text? Is
+  there structured data? It's also available as a free stand-alone tool at
+  `/website-check`.
+- **Pro plan:** a live Google Business Profile benchmark against the
+  businesses that win, custom questions, and CSV export.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Browser<br/>strict CSP, no inline JS] -->|form / JSON APIs| F[Flask app<br/>app.py, auth.py, billing.py]
+    F --> P[pipeline.py<br/>thread pool + one deadline]
+    P -->|questions x providers, in parallel| PR[providers/<br/>Claude, OpenAI, Perplexity,<br/>Gemini, DeepSeek]
+    PR -->|web-search-grounded answers + sources| A[analyzer.py<br/>mention, rank, competitors]
+    A --> R[report.py + insights.py<br/>score, pillars, action plan]
+    P --> W[website_audit.py<br/>via safe_http.py]
+    P --> G[places.py<br/>Google Places API / OSM]
+    F --> DB[(Postgres / SQLite<br/>SQLAlchemy)]
+    S[Scheduler<br/>cross-process lock] --> P
+    S --> E[Email alerts]
+    F --> ST[Stripe Checkout + webhooks]
 ```
 
-Open http://localhost:5000. A SQLite file (`data.db`) is created automatically
-on first run.
+| Layer | Where | Notes |
+|---|---|---|
+| Web app | `app.py`, `auth.py`, `billing.py`, `templates/`, `static/` | Flask 3, Jinja, Flask-Login, Flask-WTF CSRF, Flask-Limiter |
+| AI providers | `ai_visibility/providers/` | One module per assistant behind a common interface. Retries, a per-provider concurrency cap, and deadline-bounded timeouts live in `base.py`. |
+| Check pipeline | `ai_visibility/pipeline.py` | Runs every question × provider call concurrently, under one overall deadline |
+| Answer analysis | `ai_visibility/analyzer.py`, `report.py`, `insights.py` | Name matching, rank, negative mentions, competitor merging, scoring |
+| Domain knowledge | `niches.py`, `categories.py`, `category_match.py` | About 28 business niches with their customers' real questions, listing platforms by country, and fixes |
+| Location & business search | `places.py`, `search_engine.py`, `links.py` | Google Places API (New) with an OpenStreetMap fallback, query understanding, Google Maps link parsing |
+| Website check | `website_audit.py`, `safe_http.py` | Robots.txt rules as crawlers apply them (RFC 9309), a linear-time HTML parser, SSRF-safe fetching |
+| Persistence | `models.py`, `report_cache.py` | SQLAlchemy models, forward-only migrations, database-backed shareable reports |
+| Background work | `alerts.py`, `scheduled_job.py`, `locks.py` | Scheduled re-checks, change detection, email alerts. A run happens once across workers. |
 
-## Two ways to use it
+## Engineering highlights
 
-- **Anonymous quick check** (the homepage form) -- one-off report, no
-  account needed. Good for a landing-page demo.
-- **Account + saved businesses** (sign up / log in) -- save a business,
-  see its score history over time, and get it re-checked weekly with an
-  email alert on a meaningful change. Adding a business requires an active
-  subscription.
+- **External AI integrations with live web search.**
+  - Claude uses the `web_search` tool with the customer's approximate location.
+  - OpenAI uses the Responses API with `web_search` and returns the sources it consulted.
+  - Perplexity uses `user_location`.
+  - Gemini is grounded on Google Search *and* Google Maps at the customer's coordinates, and falls back to Search only if Maps grounding is rejected.
+  - DeepSeek answers from training data, and the report says so.
+  - Model IDs are environment variables, because providers retire models.
+- **Concurrency.**
+  - Every question × provider call runs in parallel on a thread pool, under one deadline that starts before geocoding.
+  - Providers read the remaining time to cap their own timeouts and retries, so calls that miss the deadline stop instead of running (and billing) on.
+  - A bounded semaphore per provider keeps bursts under rate limits.
+- **Failure handling that protects the score.**
+  - Failed, empty, refused or truncated answers (`pause_turn`, `status: incomplete`, `content: null`) are *errors*, excluded from scoring. They are never counted as "not mentioned".
+  - A provider whose calls all failed is never called "weak".
+  - 429/5xx responses are retried with backoff, honouring `Retry-After`.
+- **Authentication and access control.**
+  - Hashed passwords and session cookies (`Secure`, `SameSite=Lax`).
+  - Every business route is scoped to the logged-in owner (tested for IDOR).
+  - CSRF tokens on every form.
+  - Plan limits are enforced server-side under a per-user lock.
+- **Payments.**
+  - Stripe Checkout activates a plan only after Stripe confirms a paid checkout and a live subscription.
+  - Webhooks are signature-verified, re-fetch the current subscription state (events can arrive out of order), and ignore events for older subscriptions.
+- **SQL persistence.** SQLAlchemy runs on SQLite locally and Postgres in production. Migrations are forward-only and serialised with a Postgres advisory lock, so workers booting together can't race.
+- **Rate limiting.** Per IP for anonymous checks, per user for paid re-runs, tighter limits on login/signup. The Stripe webhook is exempt.
+- **Security.**
+  - Strict Content-Security-Policy (no inline scripts) and HSTS.
+  - Secrets are scrubbed from any error text shown to users. `/healthz` exposes no database details.
+  - Visitor-supplied URLs go through `safe_http.py`:
+    - no `user@host` tricks and only ports 80/443;
+    - DNS is resolved once *inside* the socket connect, and only public IPs are allowed (blocks DNS rebinding, IPv4-mapped IPv6, NAT64, CGNAT, link-local metadata);
+    - every redirect is re-checked;
+    - each fetch has one deadline and a size cap.
+- **Geocoding and location logic.**
+  - Location text is geocoded to drive search bias and each assistant's "where is the customer" setting.
+  - Business search splits "nene chicken macquarie centre" into *what* and *where*.
+  - Results are re-ranked by text match and distance.
+  - Different branches of a chain are kept apart.
+- **Production deployment.**
+  - Gunicorn with threaded workers on Render. The workload is I/O-bound, so one worker × 8 threads keeps in-memory rate-limit counters exact.
+  - Runs behind `ProxyFix`, so client IPs and HTTPS URLs are correct.
+  - A health check, and refuses to start in production without a real secret key.
 
-## About API keys -- everything runs in demo mode with zero setup
+## Production problems found and fixed
 
-Nothing here requires a key to try. Anything left blank in `.env` falls
-back to clearly-labeled simulated behaviour, so the whole flow -- checking,
-subscribing, saving a business, the weekly job, the alert email -- is
-testable end to end right now.
+Some of the bugs below only appeared on the real multi-worker deployment or
+with real data. The full pass-by-pass record is in
+[`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md).
 
-**AI assistants being monitored** -- missing key -> that assistant's answers
-are simulated (tagged "demo" in the UI):
+| Problem | Root cause | Fix |
+|---|---|---|
+| Every shared report link said "expired" on Render | Reports were cached in a per-process dict, so the POST and the redirected GET landed on different Gunicorn workers | Store reports in the database, shared by all workers |
+| Scores dropped when an API had a bad day | Failed or empty provider calls were counted as "not mentioned" | Treat them as errors, exclude them from the score, and say so on the report |
+| Autocomplete showed results for an old query | A slow response arrived after a newer one and overwrote it | Sequence-number guard on every fetch, and no caching of failed lookups |
+| Each business checked and emailed twice | Each Gunicorn worker started its own scheduler | Cross-process lock (Postgres advisory lock or file lock) around the run |
+| Pasted "Maps" link could reach internal addresses | `maps.google.com:@169.254.169.254` passed the host check, because the part before `@` is a username | Compare the parsed hostname, reject userinfo and non-standard ports, and use a guarded connection |
+| A hostile website could freeze a worker | Backtracking regexes on HTML (a 7 KB page took more than a second; growth was roughly cubic) | One linear `html.parser` pass |
+| Abandoned Stripe checkout could unlock Pro | The success page trusted any checkout session id that belonged to the user | Require a paid, complete session and a live subscription |
+| "Dr. Kim Dental" never counted as mentioned | Sentence splitting cut the name at "Dr." | Handle abbreviations when splitting sentences |
 
-| Provider   | Env var              | Get a key                                     |
-|------------|-----------------------|------------------------------------------------|
-| Claude     | `ANTHROPIC_API_KEY`   | https://console.anthropic.com/settings/keys    |
-| ChatGPT    | `OPENAI_API_KEY`      | https://platform.openai.com/api-keys           |
-| Perplexity | `PERPLEXITY_API_KEY`  | https://www.perplexity.ai/settings/api         |
-| Gemini     | `GOOGLE_API_KEY`      | https://aistudio.google.com/apikey             |
-| DeepSeek   | `DEEPSEEK_API_KEY`    | https://platform.deepseek.com/api_keys         |
+## Run it locally
 
-Each is a paid, pay-as-you-go API (small cents-per-query cost) -- not the
-same login as the consumer chat apps.
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env          # optional: everything runs without keys
+python app.py                 # http://localhost:5000
+```
 
-**How each one actually answers**: Claude and Gemini are called with their
-live web-search tool turned on, so their answers reflect the current web,
-not just training data. ChatGPT and DeepSeek are called via their plain
-chat-completions APIs, which answer from training data only -- there's no
-web-search tool available on those endpoints the way there is for Claude and
-Gemini today. Perplexity is inherently search-based. This is noted directly
-on each report (see the per-assistant "why a specific assistant might be
-missing you" notes) so a low ChatGPT/DeepSeek score isn't mistaken for a
-website problem when it's really a training-data-recency one.
+With no keys, every assistant returns clearly labelled *sample* answers.
+Billing runs in demo mode and alert emails go to `alerts_outbox.log`, so
+the whole flow works with zero setup.
 
-**Stripe billing** -- no `STRIPE_SECRET_KEY`/`STRIPE_PRICE_ID` -> clicking
-"Subscribe" instantly flips the account to a demo subscription, no charge,
-clearly labeled "(demo)" on the dashboard. Add real keys from
-https://dashboard.stripe.com/apikeys and a recurring Price from
-https://dashboard.stripe.com/products to take real payments; also set
-`STRIPE_WEBHOOK_SECRET` so cancellations/lapses stay in sync.
+## Tests
 
-**Email alerts** -- no SMTP creds -> alerts are written to
-`alerts_outbox.log` instead of sent, so you can see exactly what would have
-gone out. Set `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` /
-`ALERT_FROM_EMAIL` (any provider -- Gmail app password, Postmark, SES, etc.)
-to send real emails.
+```bash
+python -m pytest              # 169 tests, about 7 s, no network or API keys needed
+```
 
-## The action plan (not just a score)
+The suite covers:
 
-Every report includes a "Your action plan" section, tailored two ways:
+- answer analysis and scoring;
+- provider failure modes, including retries, deadlines, and empty or cut-off answers;
+- SSRF protection, run against a real local HTTP server (including DNS rebinding and slow-drip responses);
+- robots.txt rules;
+- Stripe flows with real `StripeObject` instances;
+- access control, plan limits, and scheduler locking.
 
-- **By business type** -- `ai_visibility/solutions.py` has playbooks for ~15
-  common local-business categories (restaurants, dentists, lawyers, salons,
-  trades, auto repair, real estate, etc.), each with the specific
-  directories/platforms and content moves that matter most for that kind of
-  business, falling back to solid general advice for anything unmatched.
-- **By which assistant is missing you** -- flags whichever of Claude/ChatGPT/
-  Perplexity/Gemini scored worst for this specific business, with a plain-
-  English (and deliberately hedged) note on how that assistant generally
-  tends to source its answers, so the advice points at the right lever
-  (e.g. Gemini leans on Google Business Profile; Perplexity leans on live
-  web search rankings; Claude leans on what's broadly crawled/cited).
+CI runs it on every push (`.github/workflows/ci.yml`).
 
-This is framed as general, defensible guidance, not a definitive diagnosis
--- no outside tool can see exactly why a given model did or didn't mention a
-business, and that mechanism isn't published and changes over time.
+## Configuration
 
-Reports saved before this feature existed are backfilled automatically the
-next time they're viewed (see `CheckRun.report` in `models.py`) -- no
-database migration needed.
+All settings are environment variables. See `.env.example` for the full list.
 
-## Business-name autocomplete
+| Variable | Purpose |
+|---|---|
+| `FLASK_SECRET_KEY` | Required in production |
+| `DATABASE_URL` | Postgres in production (SQLite by default) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY` | The assistants checked. A missing key means sample answers for that assistant. |
+| `CLAUDE_MODEL`, `OPENAI_MODEL`, `PERPLEXITY_MODEL`, `GEMINI_MODEL`, `DEEPSEEK_MODEL` | Model overrides |
+| `GOOGLE_PLACES_API_KEY` | Google business search and the Pro profile benchmark (OpenStreetMap if unset) |
+| `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_PRICE_ID_PRO`, `STRIPE_WEBHOOK_SECRET` | Billing |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `ALERT_FROM_EMAIL` | Alert emails |
+| `COMPLIMENTARY_EMAILS` | Owner/test accounts that get Pro free (comma-separated) |
+| `CHECK_TIMEOUT`, `PROVIDER_TIMEOUT`, `PROVIDER_CONCURRENCY` | Deadline and throughput tuning |
+| `RATELIMIT_STORAGE_URI` | Shared rate-limit store (e.g. Redis) if you scale past one worker |
+| `ENABLE_INPROCESS_SCHEDULER` | `0` if a host cron runs `scheduled_job.py` instead |
 
-The "Business name" and "Competitors" fields (homepage and "add a business
-to monitor") search as you type. Picking a Business-name result also fills
-in category and location; the Competitors field is comma-separated, so
-picking a result there only fills in the entry currently being typed,
-leaving earlier entries in the list untouched.
+## Deploying (Render)
 
-- No setup needed: it uses Photon (photon.komoot.io), a free OpenStreetMap-based
-  search API built for exactly this search-as-you-type use case, by default.
-- **Location-biased**: typing into the Location field geocodes it (debounced,
-  via `/api/geocode`) and that lat/lon is sent along with every Business-name
-  and Competitors search, so results are ranked toward the user's actual area
-  instead of purely on text-match fuzziness with no geography at all -- fill
-  in Location first (it's the first field for exactly this reason) for
-  meaningfully better results; a query like "nene chicken" without a location
-  bias can rank a branch on the other side of the world above the one
-  actually nearby.
-- Coverage caveat: the free path only suggests places that exist in
-  OpenStreetMap's database. Well-known chains are reliably there; a small
-  independent business may return zero suggestions even when everything is
-  working correctly -- try a well-known chain first if you want to sanity-check
-  the feature itself.
-- **Google business listings (recommended for production)**: set
-  `GOOGLE_PLACES_API_KEY` and the Business-name and Competitors fields search
-  Google's own place database -- the same listings behind Google Maps and
-  Google Business Profile -- via **Places API (New)** (enable that API, not
-  the legacy "Places API", which new projects can't enable). Typing uses
-  Autocomplete (New); picking a result makes one Place Details (New) call
-  (Essentials fields only: address components + types) to fill the exact
-  suburb and category. Both share a session token so Google bills them as
-  one search session. Google results show "Powered by Google" and are never
-  cached (Google's terms). If Google fails or finds nothing, it falls back
-  to the free OSM search. Location biasing always uses free Photon
-  geocoding, so the key only needs Places API (New).
-- **Category suggestions**: the Category field suggests from ~330 built-in
-  business categories (`categories.py`, served by `/api/categories`) and is
-  auto-filled with Google's category when a Google result is picked. Free
-  text is still accepted.
-- Entirely optional -- if the lookup is slow, blocked, or down, the fields
-  just behave like plain text inputs. Nothing about submitting the form
-  depends on it.
+1. Create a Web Service from this repo.
+   - Build command: `pip install -r requirements-prod.txt`
+   - Start command: the line in `Procfile`.
+2. Add a Render Postgres database and set `DATABASE_URL`. Set `FLASK_SECRET_KEY`
+   (`python -c "import secrets; print(secrets.token_hex(32))"`).
+3. Add the API keys as environment variables only, never in the repository.
+4. Point an uptime monitor at `/healthz`.
 
-## How it works
+## Scope and honesty
 
-**Core engine** (used by both the anonymous check and saved businesses):
-
-1. **`ai_visibility/query_generator.py`** -- builds realistic customer
-   questions from the business's category + location.
-2. **`ai_visibility/providers/`** -- one module per assistant; sends the
-   question, returns the raw answer. Missing key -> `demo_mode.py` simulates
-   one instead, tagged so the UI never presents it as real.
-3. **`ai_visibility/analyzer.py`** -- parses each raw answer: was the
-   business mentioned, how prominently, which competitors came up instead.
-4. **`ai_visibility/report.py`** -- rolls that up into a visibility score, a
-   per-assistant breakdown, a competitor leaderboard, and a fix list.
-5. **`ai_visibility/pipeline.py`** -- runs all of the above for one business
-   and returns the finished report dict.
-
-**SaaS shell around it:**
-
-6. **`models.py`** -- SQLAlchemy models: `User`, `Business` (a saved
-   business to monitor), `CheckRun` (one historical report snapshot).
-7. **`auth.py`** -- signup/login/logout (Flask-Login, hashed passwords).
-8. **`billing.py`** -- Stripe Checkout to subscribe, a webhook to keep
-   subscription status in sync, demo-mode bypass when unconfigured.
-9. **`alerts.py`** -- re-runs the pipeline for a business, stores a new
-   `CheckRun`, compares it to the previous one (`detect_meaningful_change`:
-   a 15+ point score drop, or a new competitor taking the top spot), and
-   emails the owner if so.
-10. **`app.py`** -- the Flask site tying it all together, plus an
-    in-process scheduler (single-process only -- see "Going live" below)
-    that calls `alerts.run_weekly_checks` every 7 days for every saved
-    business.
-11. **`extensions.py`** -- shared CSRF protection and rate limiting,
-    factored out so both `app.py` and `auth.py` can use them without a
-    circular import.
-12. **`scheduled_job.py`** -- the multi-worker-safe alternative to the
-    in-process scheduler; a one-shot script meant to be triggered by your
-    host's own cron/scheduler feature.
-
-## Fixes applied for going live
-
-A pass specifically looking for correctness, performance and security
-issues turned up (and fixed) these:
-
-- **Score-deflation bug** -- a failed API call (network blip, bad key) used
-  to count as "not mentioned," silently lowering a business's score for a
-  reason unrelated to its real visibility. Errors are now excluded from
-  scoring and surfaced separately in the report.
-- **Latency** -- provider calls (up to 4 assistants x up to 10 questions =
-  40 calls) ran one at a time; a real check could take a minute or more.
-  They now run concurrently on a thread pool, so wall-clock time is closer
-  to the slowest single call instead of the sum of all of them.
-- **Misleading rankings** -- a business mentioned in a prose-style answer
-  (no numbered list) used to be reported as "position #1" by a fallback
-  guess. It now correctly shows as "mentioned, unranked" instead of a
-  fabricated position.
-- **Cost-abuse / DoS risk** -- once real API keys are added, the anonymous
-  check and the "run now" button both call paid external APIs with no
-  limit. Added rate limits (5/hour anonymous checks per IP, 6/hour manual
-  reruns per user, 10/hour signup & login attempts).
-- **CSRF** -- all POST forms (signup, login, add business, run check) now
-  carry a CSRF token (Flask-WTF); the Stripe webhook is exempted since it
-  authenticates via Stripe's own signature instead.
-- **Debug mode / secrets** -- `debug=True` (a remote-code-execution risk if
-  ever exposed) is now off unless explicitly enabled and never in
-  production; the app refuses to start in production with the placeholder
-  dev secret key instead of silently running insecurely.
-- **Input validation** -- business/category/location/competitor fields now
-  have length and count limits, enforced server-side (not just in the
-  browser).
-- **SEO fundamentals** -- the landing page was missing a viewport tag
-  (breaks mobile rendering, and mobile-friendliness is a ranking factor),
-  a meta description, and Open Graph tags; added those plus `robots.txt`
-  and `sitemap.xml`, and marked account/report pages `noindex` so search
-  engines only index the one page meant to rank.
-- **Multi-worker scheduler duplication** -- the original in-process
-  scheduler would run once *per worker process*, so any real deployment
-  with more than one worker would check (and email) every business
-  multiple times over. See "Going live" below for the fix.
-
-**Second pass** (SEO/AI-optimisation/security/traffic-handling audit, applied
-in full):
-
-- **Gemini API key leak** -- the key traveled in the request URL, so a
-  failed call's error text (shown directly on the public report page) could
-  echo it back. Moved to the `x-goog-api-key` header; every provider error
-  message is also now scrubbed of any configured secret as a second line of
-  defense.
-- **Security headers** -- added `Content-Security-Policy`, `X-Frame-Options`,
-  `X-Content-Type-Options`, `Strict-Transport-Security` and
-  `Referrer-Policy` on every response. All inline `<script>` blocks were
-  moved into external `/static/*.js` files (auto-initializing from `data-*`
-  attributes) so `script-src` can stay locked to `'self'` with no
-  `'unsafe-inline'` exception.
-- **Wrong client IP / scheme behind the proxy** -- Render (and most PaaS
-  hosts) terminate TLS at a reverse proxy in front of the app, so without
-  `ProxyFix` every request looked like it came from the proxy's own IP
-  (breaking per-visitor rate limiting) and over plain HTTP (breaking
-  `https://` canonical/sitemap URLs). Added `werkzeug.middleware.proxy_fix`.
-- **Broken rate-limit page** -- hitting a rate limit used to `redirect(...),
-  429`, which does nothing useful: browsers only follow redirects on 3xx
-  responses, so visitors saw a bare, unstyled "Redirecting..." page. Now
-  renders a proper branded error page directly, alongside new custom 404 and
-  500 pages.
-- **`num_queries` could 500** -- a non-numeric value crashed with an
-  unhandled `ValueError`; now falls back to the default instead.
-- **Analyzer false positives/negatives** -- name matching is now
-  whole-word (so "Ace" no longer matches inside "Palace"), normalizes curly
-  quotes and "&"/"and", detects markdown-heading-prefixed list items
-  (`### 1. Foo`), and discovers competitors the assistant named that the
-  user never typed in.
-- **`num_queries` silently ignored** -- with a Claude key configured, the
-  truncation logic only fired when there were *fewer* queries than
-  requested, so the optional LLM-generated extras could push the total over
-  (or leave it under) what was asked for. Now always truncates to exactly
-  `num_queries`.
-- **Self-naming query inflated scores** -- one template literally asked "Is
-  {business} a good {category}...", which obviously always mentions the
-  business. Removed -- every query now tests whether the assistant
-  recommends the business *unprompted*.
-- **Category-matching false positives** -- plain substring matching mapped
-  "barber" to restaurants (via "bar"), "chair hire" to salons (via "hair"),
-  "carpet store" and "corvette repairs" to veterinary (via "pet"/"vet"),
-  "publishing house" to restaurants (via "pub"), and "dinner cruise" to
-  accommodation (via "inn"). Switched to whole-word/whole-phrase matching
-  and added missing coverage (seafood/sushi, physio/chiropractic, florists).
-- **Non-shareable, resubmission-prone reports** -- the anonymous report used
-  to render straight from the `POST /check` handler, so refreshing the page
-  re-ran (and would re-bill) the whole check, and the URL couldn't be
-  bookmarked or shared. Now post/redirect/get: `report_cache.py` stores the
-  finished report under a short-lived id and `GET /check/<id>` renders it.
-- **SEO** -- trimmed the title/description to search-engine length limits,
-  added Open Graph + Twitter Card tags and a generated share image, JSON-LD
-  (`SoftwareApplication` on the homepage, `FAQPage` on `/faq`), a proper
-  favicon, and real indexable marketing pages (`/pricing`, `/faq`, `/about`,
-  `/how-it-works`, `/privacy`, `/terms`), all listed in `sitemap.xml`.
-- **AI-crawler optimisation** -- added `/llms.txt`, a plain-language summary
-  of what the product does, for assistants/crawlers that read it.
-- **Accessibility** -- `--muted-dim` text failed WCAG AA contrast (3.67:1)
-  against the card background; lightened to pass (5.7:1+). The autocomplete
-  dropdown now exposes proper ARIA combobox/listbox roles.
-- **UX polish** -- submit buttons show a spinner and disable themselves
-  while a check runs (a real check takes several seconds); the "every
-  question asked" section is now grouped by question instead of one long
-  flat list; dev-facing "see README.md"/".env" hints are hidden once
-  `FLASK_ENV=production`.
-- **Traffic-handling** -- switched Gunicorn to threaded workers (better for
-  I/O-bound provider calls), reduced each provider's timeout from 30s to
-  15s, pinned every dependency version (and added `.python-version`) so a
-  deploy can't silently pick up an untested Python/library version.
-- **Billing cost-exposure guard** -- once a real (paid) AI provider key is
-  configured, `/billing/checkout` no longer auto-grants a free "demo"
-  subscription when Stripe isn't configured -- that combination would let
-  anyone rack up metered API cost with no payment ever collected.
-
-**Third pass** (found on the actual multi-worker Render deployment, applied
-in full):
-
-- **"That report has expired" on every real check** -- the shareable report
-  link introduced in the second pass stored reports in an in-process dict.
-  Render's Gunicorn config runs more than one worker, so the worker that
-  handled `POST /check` was very often not the one the redirected
-  `GET /check/<id>` landed on, which had never heard of that report id --
-  meaning shared/bookmarked/even just-refreshed report links failed
-  constantly in production (they happened to work in local single-process
-  testing, which is why this wasn't caught earlier). Moved to a database
-  table (`anonymous_report`) so every worker process sees every saved
-  report; verified with two separate Python processes writing/reading the
-  same SQLite file to confirm it actually survives a cross-process handoff.
-- **Autocomplete suggestions were geographically irrelevant** -- searching a
-  business name with no location context ranks purely on Photon's text-match
-  fuzziness, so e.g. "nene chicken" surfaced branches in Singapore, Toronto
-  and Melbourne with no preference for the user's own area. Added
-  `/api/geocode` (debounced on the Location field) and pass the resulting
-  lat/lon as a bias into every Business-name and Competitors search; also
-  reordered the form so Location comes first, since the bias only helps once
-  it's filled in.
-- **No autocomplete on the Competitors field** -- it was a plain text input.
-  Added a multi-value-aware mode that searches and replaces only the
-  comma-separated segment currently being typed, leaving earlier entries
-  alone, and skips the category/location autofill (a competitor is just a
-  name).
-
-**Fourth pass** (a real business name legitimately not in Photon's free
-database looked identical to a broken search -- dug into why and found two
-related bugs alongside it):
-
-- **A failed lookup was cached as if it were a real empty result** --
-  `search_places`/`geocode_location` cached whatever came back even when the
-  request itself had thrown (timeout, rate limit, transient network error),
-  so one blip made every identical query return nothing for the full 5-minute
-  cache TTL even after the provider recovered. Now only a lookup that
-  actually completed gets cached -- including a genuine zero-result answer,
-  which is still worth caching -- so a failure is retried on the very next
-  keystroke instead of being remembered as "no results" for 5 minutes.
-- **No feedback when a search genuinely finds nothing** -- a small business
-  that just isn't in Photon's OpenStreetMap-backed dataset (a known,
-  documented coverage limit, not a bug) rendered identically to "haven't
-  typed enough yet": nothing at all. Added a plain "No matches -- you can
-  still type it in manually" note so a real completed-but-empty search is
-  distinguishable from a search that hasn't run yet, and reads as expected
-  behavior rather than a broken widget.
-- **Race condition: a slow, stale response could overwrite a faster, newer
-  one** -- typing quickly (e.g. finishing a longer name after an initial
-  slower search was already in flight) had no guarantee responses would
-  render in the order they were sent. Added a per-field request sequence
-  number so only the most recently *fired* search is ever allowed to render;
-  an older one that resolves late is silently dropped.
-
-**Fifth pass** (live-site feedback: missing businesses, generic report):
-
-- **Google business search** -- Business name + Competitors now search
-  Google's listings via Places API (New) when `GOOGLE_PLACES_API_KEY` is
-  set (see above). The previous Google code used the legacy endpoint, which
-  new Google Cloud projects can't enable -- a new key would have silently
-  never worked.
-- **Category field suggestions** -- built-in category list plus Google's
-  category autofill.
-- **Questions read naturally** -- "I need a fast food in Sydney" is now "I
-  need a fast food restaurant in Sydney"; cuisines are capitalised; the
-  "for {audience}" question uses audiences that fit the business type (no
-  more "seafood restaurant for urgent appointments").
-- **Demo mode no longer fakes 100%** -- with no competitors typed in, every
-  simulated answer named the business at #1. Demo answers now include
-  clearly-labelled "Sample Rival" placeholders and the whole report is
-  marked as a sample.
-- **Report rebuilt around this check's actual data** -- headline + findings
-  with real counts (best/never-named assistants, top competitor vs you,
-  questions nobody named you for, average rank), a prioritised "What to do
-  next" where each step cites what triggered it, a question x assistant
-  grid, and a "who else gets named" comparison including you. The generic
-  per-assistant essays and duplicate "General fixes" list are gone.
-- **Subscribers see the full report too** -- the paid business page used to
-  show only the fix lists; it now renders the same report as the free check,
-  plus score change since the previous check.
-- Competitor counts merged case-insensitively and counted once per answer;
-  OSM suburbs/streets filtered out of business suggestions; "Copy link"
-  button on reports; places autocomplete rate limit raised (normal typing
-  across two fields could hit the old 30/min).
-
-**Sixth pass** (accuracy, real-world data, plans):
-
-- **Retired AI models replaced** -- `gemini-2.0-flash` was shut down on 1 June
-  2026 and DeepSeek retired `deepseek-chat`, so live checks on those would
-  have errored. Defaults are now `claude-sonnet-4-6`, `gpt-5.4-mini`,
-  `sonar`, `gemini-3.5-flash`, `deepseek-flash`, each overridable with
-  `CLAUDE_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` / `GEMINI_MODEL` /
-  `DEEPSEEK_MODEL`. `/healthz` shows which model each assistant uses.
-- **Answers use live web search, localised** -- ChatGPT now goes through the
-  Responses API with `web_search` (Chat Completions only used training
-  data). ChatGPT, Claude and Perplexity get the customer's country, city and
-  region, geocoded from the Location field. Gemini is grounded in Google
-  Search. DeepSeek has no search API, and the report says so.
-- **Sources captured** -- every answer keeps the pages the assistant read or
-  cited. The report shows "Where the assistants got their information" and
-  turns the top sites that didn't mention you into an action.
-- **Stricter, fairer matching** -- "Ace's Deep Sea Food" now matches "Aces
-  Deep Seafood" and "Kickin'Inn" matches "Kickin' Inn". Legal suffixes and
-  "The" are ignored. An answer that only says "I couldn't find information
-  about X" no longer counts as a recommendation; it gets its own finding and
-  fix. Sub-bullets ("- Address: ...") no longer inflate rank numbers or
-  appear as competitors.
-- **"What the assistants say"** -- the actual words used about you and your
-  top competitors, pulled from their answers.
-- **Google profile benchmark (Pro)** -- Places API (New) Text Search looks up
-  you and the most-recommended competitors: rating, review count, primary
-  category, website and weekend hours. It produces specific actions such as
-  "change your category to Seafood restaurant", "1,154 fewer reviews" or
-  "no website listed", plus a "not found on Google Maps" warning.
-- **Checks don't time out** -- all provider calls run at once with one
-  80-second deadline (`CHECK_TIMEOUT`), and Gunicorn's timeout is now 120s.
-  Live web-search answers take 20-40s each; the old 8-thread pool plus the
-  30s Gunicorn timeout would have killed real checks.
-- **Business suggestions stay in-country** -- the geocoded country goes to
-  Google as `includedRegionCodes`. `/healthz` shows the active search
-  backend and the last Google error (e.g. API not enabled).
-- **Navigation** -- a shared top bar on every page; the logo always goes
-  home. Logged-in users used to be redirected away from `/`, so the
-  homepage and free check were unreachable.
-- **Plans** -- Starter $29 and Pro $49 (see `plans.py`), with Stripe
-  `STRIPE_PRICE_ID` / `STRIPE_PRICE_ID_PRO`, a billing portal for switching
-  plan, and a webhook that syncs the plan.
-  - Pro adds: Google benchmark, up to 5 custom questions, 10 questions per
-    check, twice-weekly checks, 3 businesses, 10 competitors and CSV export.
-  - Subscribers can now edit or remove businesses and see a score chart.
-  - The scheduler runs every 6 hours in-process (or twice daily via cron)
-    and only re-checks businesses that are due.
-- **Free check is capped** at 6 questions and 5 competitors to control cost.
-- **Wasted API call removed** -- an optional Claude "extra questions" call
-  ran on every check, but its output was always discarded.
-
-**Seventh pass** (search suggestions -- "nene chicken macquarie center"
-returned an auto shop in Aruba):
-
-- **Root causes**:
-  - Photon's `location_bias_scale` was 1.0, which means *maximum prominence,
-    minimum location bias* (the opposite of the intent).
-  - Raw provider results were shown unfiltered, so a result matching one
-    word ("center") got through.
-  - A place typed inside the business query was treated as part of the
-    business name.
-- **New `search_engine.py`**, modelled on how map search engines handle
-  typeahead:
-  - query understanding: trailing words that geocode to a real place near
-    the user become the search centre;
-  - multi-angle candidate generation: the full query plus the name near the
-    detected place, merged and de-duplicated;
-  - re-ranking: typo-tolerant name relevance, proximity, same-country;
-  - junk filter: a result's name must contain the typed name (fully for 1-2
-    words, 2/3 for longer names);
-  - overseas namesakes are dropped when local matches exist;
-  - Google results are filtered by the same rule.
-- **No Location typed yet?** The browser's time zone (e.g. Australia/Sydney)
-  is used as a permission-free "near me" hint, the stand-in search engines
-  use for IP location.
-- **Location field now autocompletes** suburbs/towns/cities (Google
-  "(regions)" when configured, otherwise OSM places, AU/US states
-  abbreviated). Picking one sets the search centre for Business name and
-  Competitors instantly.
-- **Category field** adds synonyms ("doctor" -> general practitioner,
-  "mechanic" -> car repair shop) and typo tolerance ("resturant").
-- **UI**: matched words are bolded, distance is shown ("Herring Road,
-  Macquarie Park - 200 m"), and a "Searching..." state appears.
-
-**Eighth pass** (Google Maps links, competitor sanity checks):
-
-- **Paste a Google Maps link** in the new box at the top of every business
-  form (free check, add business, edit), or paste it straight into Business
-  name / Competitors. `links.py` reads it right away and fills name,
-  category and suburb; a competitor link adds that competitor.
-  - Link types: long `/maps/place/...` URLs, `maps.app.goo.gl` / `goo.gl`
-    share links, `g.page`, `g.co/kgs`, `share.google`, `?q=Name, Address`,
-    `/maps/search/...` and `query_place_id` / `place_id:`.
-  - Safety: short links are expanded one redirect at a time and only to
-    Google hosts (never an arbitrary URL; tested). Google's consent page is
-    unwrapped.
-  - With `GOOGLE_PLACES_API_KEY`, the place is looked up in Places API (New)
-    (place ID, or name + the link's coordinates) for the exact category and
-    suburb.
-  - Without a key: the name comes from the link, the suburb from free
-    reverse geocoding, and the category from OSM or guessed from the name.
-  - Links that carry no business information (e.g. `?cid=` only) get a clear
-    "use the Share button" message.
-- **Competitor category check** (`category_match.py`): every competitor with
-  a known category is compared with yours by industry group.
-  - A different industry (cafe vs car wash) is a **mismatch**: flagged live
-    with a Remove button, left out of tracking, and explained in the report
-    under "About your competitor list".
-  - The same industry but a different specialty (plumber vs electrician,
-    dentist vs physio) gets a softer note.
-  - Categories travel in a hidden `competitor_meta` field, so the server
-    makes the same call. They're stored per monitored business and applied
-    on every scheduled re-check.
-
-**Ninth pass** (from reviewing a real sample report for The Burger Boys):
-
-- **Sample reports no longer present made-up evidence.** "What the
-  assistants say" and praise-based advice only use real answers. On a
-  sample report the action list is labelled "example".
-- **Sample answers are realistic.** Reasons now fit the business type (no
-  more "fast response times" for a fish and chip shop), and every name has
-  a fair chance of being listed. A single typed competitor used to appear
-  in 30 of 30 answers.
-- **Broad categories are narrowed from the name.** "restaurant" + "The
-  Burger Boys" is checked as "burger restaurant"; "salon" + "Lux Nails" as
-  "nail salon". The report says so. This applies to free checks,
-  monitored businesses and competitor comparisons, and never overrides a
-  specific category the user chose.
-- **Different food counts as partial competition.** Burger vs fish and
-  chips gets a soft "partial competitor" note; cafe and bakery count as the
-  same thing.
-- **Name-only guesses never remove a competitor.** A competitor typed
-  without a known category gets a "possible mismatch" hint only; it is
-  never excluded.
-- **Fixes:**
-  - Enter in the Google Maps link box no longer submits the form.
-  - A link that reaches the server inside the name or competitor fields is
-    resolved there (unreadable links are dropped rather than tracked as a
-    business name).
-  - Live warnings use the refined category.
-
-**Tenth pass** (built around how business owners think and buy):
-
-- **Foundations.** Visibility rests on three pillars, and the report scores
-  each one: Listings & profiles, Reviews, and Website. A Google Business
-  Profile alone isn't enough, because each assistant reads different
-  sources:
-  - Gemini reads Google Maps data.
-  - ChatGPT's local answers lean on Bing / Bing Places, websites and
-    directories.
-  - Claude and Perplexity search the live web.
-  - Siri uses Apple Business Connect.
-
-  This is explained on How it works and in the FAQ.
-- **Niche library (`niches.py`).** 28 business types (cafes, takeaway,
-  restaurants, bars, dentists, GPs, allied health, vets, barbers, salons,
-  gyms, emergency trades, builders, home services, mechanics, car care,
-  lawyers, accountants, real estate, childcare, tutoring, hotels, venues,
-  shops and more). Each has:
-  - the questions its customers actually ask AI, tagged by intent: urgent,
-    price, specialty, booking, audience, reviews;
-  - the listing platforms that matter for it, by country (AU/US/UK/...),
-    e.g. HotDoc, hipages, OpenTable, Fresha, Checkatrade, Zocdoc;
-  - pillar-tagged fixes.
-
-  A miss on an intent maps to a specific fix ("Make it obvious you take
-  urgent jobs", "Name the service you were missed for", ...).
-- **Website AI-readiness check (`website_audit.py`).** This runs in every
-  check when a website is given, and as a free stand-alone tool at
-  `/website-check`. It checks:
-  - AI search crawlers allowed in robots.txt: OAI-SearchBot,
-    Claude-SearchBot, PerplexityBot, Googlebot, Bingbot. Training bots are
-    shown as info only, because blocking them doesn't affect search.
-  - noindex, HTTPS, and name / suburb / services / phone / hours in plain
-    text.
-  - JavaScript-only pages.
-  - LocalBusiness JSON-LD and an FAQ, weighted as helpful, not required,
-    per Google's guidance.
-
-  Every fetch is guarded against SSRF: public IPs only, re-checked on every
-  redirect, ports 80/443, size and time caps.
-- **Gemini also uses Google Maps grounding**, with the customer's location.
-  If Maps grounding is rejected, it retries with Search only.
-- **The website field** is auto-filled from Google when a Maps link is
-  pasted (if Places is connected), and stored per monitored business.
-
-## Going live -- checklist
-
-This runs correctly today with `python app.py` as a single process. Before
-pointing real traffic at it:
-
-1. **Run multiple workers with a real WSGI server**, not Flask's dev
-   server: `pip install -r requirements-prod.txt` then use the included
-   `Procfile` (`gunicorn app:app --workers 2 --threads 4 --worker-class
-   gthread --timeout 30 --graceful-timeout 30`) for Render/Heroku-style
-   platforms. Threaded workers suit this app well since each request mostly
-   waits on outbound AI-API calls rather than using CPU; raise `--timeout`
-   or lower `num_queries` if your host's own reverse proxy has a shorter
-   timeout than the providers' now-15s-each call budget needs.
-2. **Turn off the in-process scheduler and use `scheduled_job.py` instead**:
-   set `ENABLE_INPROCESS_SCHEDULER=0` and point your host's cron/scheduled-job
-   feature (or a plain crontab) at `python scheduled_job.py` weekly. Running
-   more than one worker with the in-process scheduler still on means every
-   business gets checked and emailed once per worker.
-3. **Move off SQLite to Postgres** for real concurrent traffic --
-   `DATABASE_URL` is already read from the environment
-   (`postgresql://user:pass@host/dbname`); SQLite's single-writer model
-   will start serializing/blocking under concurrent signups and checks.
-4. **Point rate limiting at Redis**, not in-memory storage, once you run
-   more than one worker: set `RATELIMIT_STORAGE_URI=redis://<host>:6379` --
-   otherwise each worker enforces limits separately and the real limit is
-   effectively `limit x worker_count`.
-5. **Set `FLASK_ENV=production`** and a real random `FLASK_SECRET_KEY`
-   (`python -c "import secrets; print(secrets.token_hex(32))"`) -- the app
-   will refuse to start in production without one.
-6. **Add real Stripe and SMTP credentials** (see above) once you're ready
-   to actually bill and email people instead of running in demo mode.
-7. **Point an uptime monitor at `/healthz`**.
-8. **Shareable report links are database-backed** (`report_cache.py` writes
-   to the `anonymous_report` table via `models.py`) specifically so they
-   survive running behind more than one Gunicorn worker -- an earlier
-   in-memory version broke exactly this way: whichever worker handled the
-   `POST /check` was the only one that knew about the report, so the
-   redirected `GET /check/<id>` 404'd ("report expired") whenever it landed
-   on a different worker. No extra setup needed; it just rides on whatever
-   `DATABASE_URL` is already configured (SQLite locally, Postgres once you
-   move to it per item 3 above).
-
-## What's still deliberately out of scope
-
-Password reset emails, plan tiers/usage limits, and a full test suite.
-Worth building once you've got a handful of real paying businesses
-confirming the core loop is worth scaling further.
+- AI answers vary from run to run, and no outside tool can see *why* a model chose a business. The report therefore shows what was asked, what was answered and which sources were read, and frames its advice as evidence-based guidance, not a guarantee.
+- Sample answers are always labelled as sample answers.
+- Not built yet: password-reset emails, team accounts, white-label PDF reports.
