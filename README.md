@@ -9,7 +9,7 @@ where they got their information, and what to fix. It covers your Google
 profile, your reviews and your website. Subscribers get automatic re-checks
 and an email when something changes.
 
-**Live app:** <https://YOUR-RENDER-APP.onrender.com>, deployed on Render with Postgres.
+**Live app:** <https://YOUR-REAL-NAME.onrender.com>, deployed on Render with Postgres.
 
 ---
 
